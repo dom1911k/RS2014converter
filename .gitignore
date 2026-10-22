@@ -8,3 +8,4 @@ packager/bin/
 packager/obj/
 packager/publish/
 .pytest_cache/
+upload/

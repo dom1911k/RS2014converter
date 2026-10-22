@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", help="output folder (default: 'output' next to the audio)")
     ap.add_argument("--config", help="use another config file instead of config.yaml")
     ap.add_argument("--no-package", action="store_true", help="skip building the .psarc")
+    ap.add_argument("--no-tab", action="store_true", help="ignore any tab and transcribe the audio instead")
     args = ap.parse_args(argv)
 
     from rs2014conv import config as config_mod
@@ -85,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         print("Please give the artist: --artist \"...\" (or 'artist:' in song.yaml)", file=sys.stderr)
         return 2
     tab = Path(args.tab).resolve() if args.tab else tab
+    if args.no_tab:
+        tab = None
     stem = Path(args.stem).resolve() if args.stem else stem
     cover = Path(args.cover).resolve() if args.cover else cover
     out = args.out or song.get("output_dir")

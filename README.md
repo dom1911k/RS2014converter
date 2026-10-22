@@ -305,7 +305,23 @@ To start completely fresh, delete the `.venv` and `cache` folders and run `setup
 
 ---
 
-## 6. For tinkering / testing
+## 6. Helping to improve it (testing with your songs)
+
+Songs with a **good Guitar Pro tab** are the best test material: the tab chart is the reference, and
+the tool can measure how well it does from the audio alone. Two ways to share results:
+
+* **No audio leaves your PC (recommended):** put your song folders (audio + tab + `song.yaml`)
+  in one folder and drag that folder onto **`evaluate_songs.bat`**. Each song is charted with and
+  without its tab and scored. You get `evaluation\summary.txt` (one line per song: notes found,
+  wrong pitches, fingering, bar lines) and `evaluation\evaluation_results.zip`. That zip holds the
+  scores, reports, charts and tabs, but no audio, typically under 1 MB in total, so it's easy to send.
+  Expect 1-3 minutes per song with a GPU.
+* **Small audio packages:** drag song folders onto **`prepare_upload.bat`**. Each becomes
+  `upload\<song>.zip` with the audio as a 192 kbps MP3 (about 1.5 MB per minute, so 4-minute
+  songs are ~6 MB) plus its tab and `song.yaml`. Use this for songs where something sounds wrong,
+  so they can be examined in detail.
+
+## 7. For tinkering / testing
 
 * `tests\make_synthetic.py OUTDIR` makes a test song with a known bass line, drifting tempo, a GP5
   tab (with count-in and repeats) and a `truth.json`. `tests\evaluate.py OUTPUT_SONG_FOLDER truth.json`
@@ -314,6 +330,8 @@ To start completely fresh, delete the `.venv` and `cache` folders and run `setup
   `--humanize 0.025` (bassist off the grid), `--cents -30` (A≈432 Hz), `--legato` (pull-offs).
 * `tests\regression.py WORKDIR` makes all test songs, runs every scenario and prints a score table.
 * `.venv\Scripts\python -m pytest tests` runs the unit tests.
+* `tests\compare_charts.py WITH_TAB_FOLDER NO_TAB_FOLDER` scores one audio-only chart against a tab chart.
+* `make_cdlc.bat ... --no-tab` ignores a tab that is in the song folder.
 * `packager\publish\RsPackager.exe check project.rs2dlc` runs DLC Builder's checks on an
   arrangement. `RsPackager.exe verify file.psarc` shows the levels and notes in a package.
 
