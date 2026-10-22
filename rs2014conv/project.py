@@ -21,9 +21,14 @@ def dlc_key(charter: str, artist: str, title: str) -> str:
         return re.sub(r"[^A-Za-z0-9]", "", s)[:n]
 
     prefix = part(charter, 2) or "MC"
-    key = prefix + part(artist, 5) + part(title, 5)
-    while len(key) < 5:
-        key += "X"
+    a, t = part(artist, 5), part(title, 5)
+    key = prefix + a + t
+    if len(a) + len(t) < 6:
+        # Titles/artists without Latin letters (e.g. Japanese) would all get the same key.
+        import hashlib
+
+        digest = hashlib.sha1(f"{artist}|{title}".encode("utf-8")).hexdigest()
+        key += "".join(c for c in digest if c.isalpha())[:4].upper() + digest[:2]
     return key
 
 
@@ -41,7 +46,7 @@ def load_ids(path: Path, key: str) -> dict:
 
 def write(path: Path, *, ids: dict, meta: dict, audio: str, preview: str | None, preview_start: float | None,
           cover: str, xml: str, offsets: list[int], bass_pick: bool, tone_key: str, author: str,
-          volume: float = -7.0, preview_volume: float = -7.0) -> None:
+          volume: float = -7.0, preview_volume: float = -7.0, tuning_pitch: float = 440.0) -> None:
     proj = {
         "Version": meta.get("version", "1"),
         "Author": author,
@@ -64,7 +69,7 @@ def write(path: Path, *, ids: dict, meta: dict, audio: str, preview: str | None,
                 "ScrollSpeed": 1.3,
                 "BassPicked": bass_pick,
                 "Tuning": list(offsets[:6]),
-                "TuningPitch": 440.0,
+                "TuningPitch": round(float(tuning_pitch), 3),
                 "BaseTone": tone_key,
                 "Tones": [],
                 "MasterID": ids["MasterID"],

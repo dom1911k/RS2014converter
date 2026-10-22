@@ -334,6 +334,44 @@ def align(lt: LinearTab, tuning: list[int], stem_path, bm: BeatMap, try_shifts: 
     return Alignment(times, name, cost, beat_cost, shift, flagged, grid)
 
 
+def snap_to_onsets(notes: list[Note], stem_path, tolerance: float = 0.04, minimum: float = 0.015) -> tuple[int, float]:
+    """Move tab notes onto the attacks heard in the bass stem (players are rarely exactly on the
+    grid). Only moves between `minimum` (the onset detector's own uncertainty, ~15 ms) and
+    `tolerance` are made, the note order never changes, and
+    legato notes (hammer-ons, pull-offs, slide targets) are left alone because they have no attack.
+
+    Returns (number of notes moved, median absolute move in ms).
+    """
+    from .transcribe import HOP, SR as TSR, _onsets
+
+    y = audio_io.load(stem_path, sr=TSR, mono=True)[0]
+    peak = float(np.abs(y).max())
+    if peak < 1e-4 or not notes:
+        return 0, 0.0
+    onsets = _onsets(y / peak * 0.9, 0.5) * HOP / TSR
+    if not len(onsets):
+        return 0, 0.0
+    moves = []
+    slide_targets = {i + 1 for i, n in enumerate(notes) if n.slide_to >= 0 or n.link_next}
+    for i, n in enumerate(notes):
+        if n.hammer_on or n.pull_off or i in slide_targets:
+            continue
+        k = int(np.argmin(np.abs(onsets - n.time)))
+        d = float(onsets[k] - n.time)
+        if abs(d) > tolerance or abs(d) < minimum:
+            continue
+        lo = notes[i - 1].time + 0.03 if i > 0 else 0.0
+        hi = notes[i + 1].time - 0.03 if i + 1 < len(notes) else n.time + 1.0
+        new = n.time + d
+        if not (lo < new < hi):
+            continue
+        if n.sustain > 0:
+            n.sustain = max(0.1, n.sustain - d)
+        n.time = new
+        moves.append(abs(d))
+    return len(moves), (1000 * float(np.median(moves)) if moves else 0.0)
+
+
 # --------------------------------------------------------------------------- tab -> chart
 
 def build_chart_parts(lt: LinearTab, al: Alignment, bm: BeatMap, song_length: float, tuning: list[int],
@@ -358,12 +396,16 @@ def build_chart_parts(lt: LinearTab, al: Alignment, bm: BeatMap, song_length: fl
     # Lead-in before the tab: the tab's first beat interval, grouped in its measure length.
     first_m = lt.measures[first_kept]
     t0_tab = times[start_beat]
-    lead = []
-    t = t0_tab - tab_ibi0
+    # Use the recording's own beats before the tab starts (intro without bass, drifting tempo);
+    # only extrapolate before the first detected beat.
+    grid = al.grid if al.grid is not None else bm.times
+    lead = [float(t) for t in grid if 0.02 < t < t0_tab - 0.3 * tab_ibi0]
+    ext = []
+    t = (lead[0] if lead else t0_tab) - tab_ibi0
     while t > 0.02:
-        lead.append(t)
+        ext.append(t)
         t -= tab_ibi0
-    lead = lead[::-1]
+    lead = ext[::-1] + lead
     mnum = 0
     for k, t in enumerate(lead):
         is_db = (len(lead) - k) % first_m.beats == 0
@@ -402,16 +444,20 @@ def build_chart_parts(lt: LinearTab, al: Alignment, bm: BeatMap, song_length: fl
                 bt_.measure = m
         mnum = m
     # After the tab: continue with the tab's last measure length until the audio ends.
+    # The recording's beats are used where they exist (outro), then the last tempo continues.
     last_m = lt.measures[-1]
     ibi = times[-1] - times[-2]
-    t = times[-1]
-    k = 0
+    tail = [float(times[-1])] + [float(t) for t in grid if t > times[-1] + 0.3 * ibi]
+    t = tail[-1] + ibi
     while t < song_length + ibi:
+        tail.append(t)
+        t += ibi
+    for k, t in enumerate(tail):
+        if t > song_length + ibi:
+            break
         if k % last_m.beats == 0:
             mnum += 1
         beats.append(Beat(t, mnum if k % last_m.beats == 0 else -1))
-        t += ibi
-        k += 1
 
     # Notes
     notes: list[Note] = []
@@ -478,6 +524,6 @@ def build_chart_parts(lt: LinearTab, al: Alignment, bm: BeatMap, song_length: fl
 
     sections = []
     for m, mb in zip(lt.measures, lt.measure_start_beat):
-        if m.marker:
+        if m.marker and times[mb] >= 0.0:
             sections.append(Section(m.marker, float(times[mb])))
     return beats, notes, sections, tsigs

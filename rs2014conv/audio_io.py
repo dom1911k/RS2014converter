@@ -50,3 +50,13 @@ def file_hash(path: str | Path, extra: str = "") -> str:
 
 def duration(path: str | Path) -> float:
     return load(path, sr=8000, mono=True).shape[1] / 8000.0
+
+
+def encode_ogg(src: str | Path, dst: str | Path, quality: int = 6) -> None:
+    """Ogg Vorbis (what EOF wants). Falls back to ffmpeg's own Vorbis encoder."""
+    for codec in (["-c:a", "libvorbis", "-q:a", str(quality)], ["-c:a", "vorbis", "-strict", "-2", "-ac", "2"]):
+        r = subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(src), *codec, str(dst)],
+                           capture_output=True)
+        if r.returncode == 0:
+            return
+    raise RuntimeError("ffmpeg could not encode Ogg Vorbis")

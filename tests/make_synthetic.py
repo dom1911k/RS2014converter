@@ -46,6 +46,21 @@ def bass_tone(f0: float, dur: float, seed: int, fundamental: float = 0.55) -> np
     return (y * env * 0.25).astype(np.float32)
 
 
+def legato_tone(freqs: list[float], durs: list[float], fundamental: float = 0.55) -> np.ndarray:
+    """One plucked note whose pitch steps to new notes without a new attack (hammer-on/pull-off)."""
+    n = int((sum(durs) + 0.08) * SR)
+    t = np.arange(n) / SR
+    edges = np.concatenate([[0], np.cumsum(durs)])
+    f = np.full(n, freqs[-1])
+    for k, fr in enumerate(freqs):
+        f[(t >= edges[k]) & (t < edges[k + 1])] = fr
+    phase = 2 * np.pi * np.cumsum(f) / SR
+    amps = [fundamental, 1.0, 0.6, 0.35, 0.2, 0.12]
+    y = sum(a * np.sin((k + 1) * phase) * np.exp(-t * (0.8 + 0.5 * k)) for k, a in enumerate(amps))
+    env = np.minimum(1, t / 0.005) * np.clip((sum(durs) + 0.08 - t) / 0.08, 0, 1)
+    return (y * env * 0.25).astype(np.float32)
+
+
 def drum_hit(kind: str, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     if kind == "kick":
@@ -70,6 +85,9 @@ def main():
     ap.add_argument("--tuning-shift", type=int, default=0, help="render the audio this many semitones off the tab")
     ap.add_argument("--lead", type=float, default=1.3)
     ap.add_argument("--form", default="".join(FORM), help="riff letters actually played in the audio")
+    ap.add_argument("--humanize", type=float, default=0.0, help="random timing error of the bassist (s, max)")
+    ap.add_argument("--cents", type=float, default=0.0, help="tuning reference offset of the recording")
+    ap.add_argument("--legato", action="store_true", help="play riff C's last notes as pull-offs (no attack)")
     ap.add_argument("--fundamental", type=float, default=0.55, help="level of the fundamental vs 2nd harmonic")
     a = ap.parse_args()
     out = Path(a.out)
@@ -93,16 +111,37 @@ def main():
 
     truth = []
     seed = 0
+    rng = np.random.default_rng(7)
+    ref = 440 * 2 ** (a.cents / 1200)
     for bar_i, sec in enumerate(form):
         bar = bar_i + 1
-        for pos, ln, s, f in RIFFS[sec]:
+        riff = RIFFS[sec]
+        k = 0
+        while k < len(riff):
+            pos, ln, s, f = riff[k]
             b0 = bar * 4 + pos
-            t0, t1 = time_of(b0), time_of(b0 + ln)
+            jitter = float(rng.uniform(-a.humanize, a.humanize)) if a.humanize else 0.0
+            t0, t1 = time_of(b0) + jitter, time_of(b0 + ln)
             pitch = TUNING[s] + f + a.tuning_shift
-            f0 = 440 * 2 ** ((pitch - 69) / 12)
+            f0 = ref * 2 ** ((pitch - 69) / 12)
+            if a.legato and sec == "C" and k == 1:  # 5 -> 3 -> 2 on the A string as pull-offs
+                group = riff[1:4]
+                times = [time_of(bar * 4 + g[0]) + (jitter if i == 0 else 0.0) for i, g in enumerate(group)]
+                end = time_of(bar * 4 + group[-1][0] + group[-1][1])
+                durs = list(np.diff(times + [end]))
+                freqs = [ref * 2 ** ((TUNING[g[2]] + g[3] + a.tuning_shift - 69) / 12) for g in group]
+                durs[-1] -= 0.02
+                add(bass, times[0], legato_tone(freqs, durs, a.fundamental))
+                for i, g in enumerate(group):
+                    truth.append({"time": times[i], "end": times[i] + durs[i], "string": g[2], "fret": g[3],
+                                  "pitch": TUNING[g[2]] + g[3] + a.tuning_shift, "legato": i > 0})
+                k += 3
+                seed += 3
+                continue
             add(bass, t0, bass_tone(f0, t1 - t0 - 0.02, seed, a.fundamental))
             truth.append({"time": t0, "end": t1, "pitch": pitch, "string": s, "fret": f})
             seed += 1
+            k += 1
     # Drums for all bars, chords pad (simple triads) in the bass-line bars
     for b in range(bars * 4):
         t = bt[b]
@@ -110,7 +149,7 @@ def main():
         add(mix, t, drum_hit("hat", 1000 + b))
         add(mix, (bt[b] + bt[b + 1]) / 2, drum_hit("hat", 2000 + b))
     for bar_i, sec in enumerate(form):
-        root = {"A": 52, "B": 57, "C": 62, "D": 52}[sec] + a.tuning_shift
+        root = {"A": 52, "B": 57, "C": 62, "D": 52}[sec] + a.tuning_shift + a.cents / 100
         t0, t1 = time_of((bar_i + 1) * 4), time_of((bar_i + 2) * 4)
         n = int((t1 - t0) * SR)
         tt = np.arange(n) / SR

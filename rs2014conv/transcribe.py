@@ -183,6 +183,22 @@ def _segment(midi: np.ndarray, voiced: np.ndarray, conf: np.ndarray, rms: np.nda
     boundaries[starts] = True
     if voiced[0]:
         boundaries[0] = True
+    # A plucked note makes the level jump; a hammer-on / pull-off doesn't (the string keeps
+    # ringing and just changes pitch). Frames with such a jump, or where sound starts, are attacks.
+    # `rms` uses 40 ms windows: shorter ones ripple with the period of low bass notes.
+    rms_db = 20 * np.log10(rms / (rms.max() + 1e-12) + 1e-9)
+    attack = np.zeros(n + 1, bool)
+    def rise(f: int) -> float:
+        before = rms_db[max(0, f - 8):max(0, f - 2)]
+        after = rms_db[min(n, f + 2):min(n, f + 10)]
+        return float(after.max() - before.mean()) if len(before) and len(after) else 99.0
+
+    for f in np.flatnonzero(boundaries[:n]):
+        # A boundary found from the pitch change can be a few frames after the pluck itself.
+        if max(rise(g) for g in range(max(0, f - 6), f + 1)) > 1.0:
+            attack[f] = True
+    for f in list(starts) + ([0] if voiced[0] else []):
+        attack[max(0, f - 5):min(n + 1, f + 6)] = True
 
     notes: list[Note] = []
     idx = np.flatnonzero(boundaries)
@@ -202,8 +218,40 @@ def _segment(midi: np.ndarray, voiced: np.ndarray, conf: np.ndarray, rms: np.nda
         core = pitches[len(pitches) // 5: max(len(pitches) // 5 + 1, 4 * len(pitches) // 5)]
         p = int(round(float(np.median(core))))
         c = float(np.mean(conf[seg][v]))
-        notes.append(Note(time=start * HOP / SR, sustain=(end - start) * HOP / SR, pitch=p, confidence=c))
+        note = Note(time=start * HOP / SR, sustain=(end - start) * HOP / SR, pitch=p, confidence=c)
+        note._legato = not attack[start]  # type: ignore[attr-defined]
+        notes.append(note)
+    # Legato only counts when the previous note was still sounding (no gap).
+    for a, b in zip(notes, notes[1:]):
+        if b._legato and b.time - a.end > 0.03:  # type: ignore[attr-defined]
+            b._legato = False  # type: ignore[attr-defined]
+    if notes:
+        notes[0]._legato = False  # type: ignore[attr-defined]
     return notes
+
+
+def apply_legato(notes: list[Note], max_hopo_frets: int = 4) -> int:
+    """After fingering: legato notes on the same string become hammer-ons / pull-offs (small
+    intervals) or slides from the previous note (bigger intervals). Returns the count."""
+    count = 0
+    for a, b in zip(notes, notes[1:]):
+        if not getattr(b, "_legato", False) or a.string != b.string or a.mute or b.mute:
+            continue
+        d = b.fret - a.fret
+        if d == 0:
+            continue
+        if abs(d) <= max_hopo_frets and not (d > 0 and a.fret == 0 and b.fret > 4):
+            if d > 0:
+                b.hammer_on = True
+            else:
+                b.pull_off = True
+        elif a.fret > 0 and b.fret > 0:
+            a.slide_to = b.fret
+            a.sustain = max(0.1, b.time - a.time - 0.02)
+        else:
+            continue
+        count += 1
+    return count
 
 
 # --------------------------------------------------------------------------- post-processing
@@ -365,7 +413,11 @@ def transcribe(stem_path, bm: BeatMap, cfg: TranscribeConfig, cache_dir=None) ->
 
     onset_frames = _onsets(y, cfg.onset_sensitivity)
     onset_times = onset_frames * HOP / SR
-    notes = _segment(midi, voiced, conf, rms, onset_frames, cfg)
+    import librosa
+
+    rms40 = librosa.feature.rms(y=y, frame_length=640, hop_length=HOP, center=True)[0]
+    rms40 = np.pad(rms40, (0, max(0, n - len(rms40))), mode="edge")[:n]
+    notes = _segment(midi, voiced, conf, rms40, onset_frames, cfg)
     raw_count = len(notes)
 
     spec = BassSpectrum(y)

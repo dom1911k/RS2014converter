@@ -219,6 +219,10 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
             lt, al, bm, song_length, tun, float(cfg["tab"]["min_sustain_beats"]))
         flagged = al.flagged
         report.add(f"Tab alignment: grid '{al.grid_name}', match quality {1 - al.cost:.2f}")
+        if cfg["tab"].get("snap_to_onsets", False):
+            moved, med_ms = tab_align.snap_to_onsets(notes, stem_path, float(cfg["tab"].get("snap_tolerance", 0.04)))
+            info(f"{moved} tab note(s) nudged onto the attacks in the recording (median {med_ms:.0f} ms)")
+            report.add(f"Tab notes nudged onto the recording's attacks: {moved} (median {med_ms:.0f} ms)")
         chart_tuning = reduce_to_four_strings(notes, tun)
         keep_given = True
     else:
@@ -230,9 +234,12 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         tcfg.device = device
         if inp.grid:
             tcfg.grid = inp.grid
+        if inp.tuning:  # a known tuning gives the real playable range for the octave checks
+            tun, tname = tuning.parse_tuning(inp.tuning, inp.strings)
+            tcfg.lowest_pitch = tun[0]
+            tcfg.highest_pitch = tun[min(3, len(tun) - 1)] + 24
         notes, stats = transcribe(stem_path, bm, tcfg, cache)
         if inp.tuning:
-            tun, tname = tuning.parse_tuning(inp.tuning, inp.strings)
             tuning_note = f"{tname} (given)"
         else:
             tun, tname, why = tuning.guess_tuning([n.pitch for n in notes], inp.strings)
@@ -248,6 +255,15 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
                                         if k in fingering.FingeringConfig.__dataclass_fields__})
     notes.sort(key=lambda n: n.time)
     hands = fingering.assign(notes, chart_tuning, fcfg, keep_given=keep_given)
+    moved_oct = sum(1 for n in notes if getattr(n, "_octave_moved", False))
+    if moved_oct:
+        warn(f"{moved_oct} note(s) were out of range for the tuning and were moved by an octave.")
+    if not inp.tab:
+        from .transcribe import apply_legato
+
+        legato = apply_legato(notes)
+        if legato:
+            info(f"{legato} legato note(s) marked as hammer-on / pull-off / slide")
     shifts = sum(1 for a, b in zip(hands, hands[1:]) if a != b)
     info(f"{len(notes)} notes, {shifts} hand position changes, highest fret {max((n.fret for n in notes), default=0)}")
 
@@ -301,6 +317,19 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     for t in tnotes:
         warn(t)
 
+    # Tuning reference (A=440 or not): measured on the bass stem unless set in config.yaml.
+    tp = cfg.get("tuning_pitch", "auto")
+    if str(tp).lower() == "auto":
+        cents = tuning.estimate_reference_cents(stem_path)
+        info(f"Tuning reference: {cents:+.0f} cents from A=440 (A={tuning.cents_to_pitch(cents):.1f} Hz)")
+        if abs(cents) < 10:
+            cents = 0.0
+    else:
+        cents = 1200 * float(np.log2(float(tp) / 440.0))
+    tuning_pitch = tuning.cents_to_pitch(cents)
+    if cents:
+        report.add(f"Tuning reference: A={tuning_pitch:.1f} Hz ({cents:+.0f} cents) - the in-game tuner uses this")
+
     step("Writing Rocksmith files")
     meta = {
         "title": inp.title, "artist": inp.artist, "album": inp.album or inp.title,
@@ -309,7 +338,9 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     meta.update(title_sort=project.sort_value(meta["title"]), artist_sort=project.sort_value(meta["artist"]),
                 album_sort=project.sort_value(meta["album"]))
     xml_path = proj_dir / "arr_bass_RS2.xml"
-    rsxml.write(xml_path, chart, meta, offsets, anchors, bass_picked, TONE_KEY)
+    rsxml.write(xml_path, chart, meta, offsets, anchors, bass_picked, TONE_KEY, cent_offset=cents,
+                phrase_bars=int(cfg["sections"].get("phrase_bars", 8)))
+    (proj_dir / "auto_showlights.xml").unlink(missing_ok=True)  # regenerated from the new chart
 
     audio_path = proj_dir / "audio.wav"
     tmp_audio = proj_dir / "audio.tmp.wav"
@@ -324,19 +355,23 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     if inp.cover:
         from PIL import Image
 
-        Image.open(inp.cover).convert("RGB").resize((512, 512)).save(cover_path)
+        from PIL import ImageOps
+
+        ImageOps.fit(Image.open(inp.cover).convert("RGB"), (512, 512), Image.LANCZOS).save(cover_path)
     elif not cover_path.exists():
         cover.make_cover(cover_path, inp.title, inp.artist)
 
     chorus = next((s.time for s in chart.sections if s.name == "chorus"), None)
-    preview_start = chorus if chorus is not None else max(0.0, chart.song_length / 2 - 14)
+    preview_start = chorus if chorus is not None else chart.song_length / 2 - 14
+    preview_start = max(0.0, min(preview_start, chart.song_length - 30))
     ids = project.load_ids(proj_dir / "ids.json", project.dlc_key(cfg["charter_name"], inp.artist, inp.title))
     rs2dlc = proj_dir / f"{_safe(inp.artist)}_{_safe(inp.title)}.rs2dlc"
     project.write(rs2dlc, ids=ids, meta=meta, audio="audio.wav", preview="audio_preview.wav",
                   preview_start=preview_start, cover="cover.png", xml=xml_path.name, offsets=offsets,
-                  bass_pick=bass_picked, tone_key=TONE_KEY, author=cfg["charter_name"])
+                  bass_pick=bass_picked, tone_key=TONE_KEY, author=cfg["charter_name"], tuning_pitch=tuning_pitch)
     info(f"Arrangement XML: {xml_path}")
     info(f"DLC Builder project: {rs2dlc}")
+    eof_path = _write_eof(proj_dir, audio_path, xml_path, cfg)
 
     step("Review files")
     exports.write_midi(review_dir / "chart.mid", chart, inp.title)
@@ -346,7 +381,7 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         stem_audio = np.concatenate([np.zeros((stem_audio.shape[0], int(round(pad * SR))), np.float32), stem_audio], 1)
     cm = cfg["check_mix"]
     main, split = checkmix.render(chart, mix, stem_audio if cm["split_file"] else None, SR, cm["clicks"],
-                                  float(cm["synth_gain_db"]))
+                                  float(cm["synth_gain_db"]), cents)
     audio_io.save_wav(review_dir / "check_mix.wav", main, SR)
     if split is not None:
         audio_io.save_wav(review_dir / "check_bass_vs_chart.wav", split, SR)
@@ -387,12 +422,37 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     report.add(f"  Check mix:   {review_dir / 'check_mix.wav'}")
     report.add(f"  Stem/chart:  {review_dir / 'check_bass_vs_chart.wav'} (left = bass stem, right = chart synth)")
     report.add(f"  MIDI / GP5:  {review_dir / 'chart.mid'}, {review_dir / 'chart.gp5'}")
+    if eof_path:
+        report.add(f"  EOF project: {eof_path}")
     report.add(f"  Rocksmith XML (open in EOF via File > Import > Rocksmith): {xml_path}")
     report.add(f"  DLC Builder project: {rs2dlc}")
     (out_dir / "report.txt").write_text("\n".join(report.lines) + "\n", encoding="utf-8")
     step("Done")
     print("\n".join(report.lines[-7:]))
     return out_dir
+
+
+def _write_eof(proj_dir: Path, audio_path: Path, xml_path: Path, cfg: dict) -> Path | None:
+    """An EOF (Editor On Fire) project of the chart + the Ogg audio it needs, for hand edits."""
+    cmd = find_packager(cfg)
+    if not cmd:
+        return None
+    eof_dir = proj_dir / "eof"
+    eof_dir.mkdir(exist_ok=True)
+    ogg = eof_dir / "guitar.ogg"
+    try:
+        if not ogg.exists() or ogg.stat().st_mtime < audio_path.stat().st_mtime:
+            audio_io.encode_ogg(audio_path, ogg)
+        target = eof_dir / "notes.eof"
+        r = subprocess.run(cmd + ["eof", str(xml_path), "--ogg", ogg.name, "--out", str(target)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or r.stdout).strip())
+        info(f"EOF project: {target}")
+        return target
+    except Exception as e:  # noqa: BLE001 - optional extra
+        warn(f"Could not create the EOF project ({e}); you can still import the XML in EOF.")
+        return None
 
 
 def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | None:

@@ -160,7 +160,9 @@ def _read_gp345(path: Path, track_index: int | None) -> TabSong:
             direction=h.direction.name if h.direction else "",
             jump=h.fromDirection.name if h.fromDirection else "",
         )
-        for voice in meas.voices[:1] if len(meas.voices) else []:
+        # Normally voice 1; some tabs put the bass line in voice 2.
+        voices_with_notes = [v for v in meas.voices if any(b.notes for b in v.beats)]
+        for voice in voices_with_notes[:1]:
             for beat in voice.beats:
                 if beat.start is None:
                     continue
@@ -415,10 +417,14 @@ def _read_gpif(path: Path, track_index: int | None) -> TabSong:
         )
         bar_ids = (mb.findtext("Bars") or "").split()
         if ti < len(bar_ids) and bar_ids[ti] in bars:
-            voice_ids = (bars[bar_ids[ti]].findtext("Voices") or "").split()
-            if voice_ids and voice_ids[0] != "-1" and voice_ids[0] in voices:
+            voice_ids = [v for v in (bars[bar_ids[ti]].findtext("Voices") or "").split() if v in voices]
+            # Normally voice 1; some tabs put the bass line in another voice.
+            with_notes = [v for v in voice_ids
+                          if any((beats[b].findtext("Notes") or "").strip()
+                                 for b in (voices[v].findtext("Beats") or "").split())]
+            if with_notes:
                 t = pos
-                for bid in (voices[voice_ids[0]].findtext("Beats") or "").split():
+                for bid in (voices[with_notes[0]].findtext("Beats") or "").split():
                     b = beats[bid]
                     if b.find("GraceNotes") is not None:
                         continue

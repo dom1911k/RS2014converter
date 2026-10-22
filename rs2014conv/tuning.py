@@ -137,3 +137,25 @@ def guess_tuning(pitches: list[int], strings: int = 4) -> tuple[list[int], str, 
         name = "Drop C" if counts[25] == 0 else "C Standard"
     base, disp = parse_tuning(name, 4)
     return base, disp, f"lowest note {note_name(lowest)}"
+
+
+def estimate_reference_cents(stem_path) -> float:
+    """How far the recording's tuning is from A=440 Hz, in cents (e.g. -32 for A=432 Hz).
+
+    Measured on the bass stem with librosa's pitch histogram, so tape-speed drift on old records
+    or a band tuning to something other than 440 is picked up.
+    """
+    import librosa
+
+    from . import audio_io
+
+    y = audio_io.load(stem_path, sr=22050, mono=True)[0]
+    if float(abs(y).max()) < 1e-4:
+        return 0.0
+    frac = librosa.estimate_tuning(y=y, sr=22050, n_fft=8192, resolution=0.01, bins_per_octave=12,
+                                   fmin=38.0, fmax=800.0)
+    return float(frac) * 100.0
+
+
+def cents_to_pitch(cents: float) -> float:
+    return 440.0 * 2 ** (cents / 1200.0)

@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\third_party\Rocksmith2014.NET\src\Rocksmith2014.Audio\Rocksmith2014.Audio.fsproj" />
     <ProjectReference Include="..\third_party\Rocksmith2014.NET\src\Rocksmith2014.DLCProject\Rocksmith2014.DLCProject.fsproj" />
+    <ProjectReference Include="..\third_party\Rocksmith2014.NET\src\Rocksmith2014.EOF\Rocksmith2014.EOF.fsproj" />
   </ItemGroup>
 
 </Project>

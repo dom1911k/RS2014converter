@@ -25,6 +25,7 @@ class FingeringConfig:
     string_jump_cost: float = 0.12
     open_string_bonus: float = 0.15
     high_open_penalty: float = 0.4
+    legato_string_change: float = 2.5  # hammer-ons/pull-offs/slides need the previous note's string
 
 
 def _candidates(pitch: int, tuning: list[int], max_fret: int) -> list[tuple[int, int]]:
@@ -58,7 +59,10 @@ def assign(notes: list[Note], tuning: list[int], cfg: FingeringConfig | None = N
                 while p > tuning[-1] + cfg.max_fret:
                     p -= 12
                 n.pitch = p
+                n._octave_moved = True  # type: ignore[attr-defined]
                 cands = _candidates(p, tuning, cfg.max_fret)
+        # Legato (no new attack: hammer-on, pull-off, slide) is only possible on the same string.
+        legato = bool(getattr(n, "_legato", False) or n.hammer_on or n.pull_off)
         gap = 1.0 if prev_time is None else max(0.05, n.time - prev_time)
         urgency = 1.0 + 0.35 / gap
         prev_time = n.time
@@ -84,6 +88,8 @@ def assign(notes: list[Note], tuning: list[int], cfg: FingeringConfig | None = N
                     for ps, (pc, _) in prev_layer.items():
                         ph = ps[2]
                         c = pc + local + cfg.string_jump_cost * abs(ps[0] - s)
+                        if legato and ps[0] != s:
+                            c += cfg.legato_string_change
                         if h != ph and f != 0:
                             c += urgency * (cfg.shift_cost + cfg.shift_per_fret * abs(h - ph))
                         if c < best[0]:

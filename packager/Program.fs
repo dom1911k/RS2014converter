@@ -6,6 +6,7 @@
 ///   RsPackager build <project.rs2dlc> [--out <dir>] [--wwise <WwiseConsole.exe>] [--mac] [--auto-volume]
 ///   RsPackager check <project.rs2dlc>
 ///   RsPackager verify <file.psarc>
+///   RsPackager eof <arrangement.xml> --ogg <audio file name> --out <notes.eof>
 module RsPackager.Program
 
 open System
@@ -17,6 +18,7 @@ open Rocksmith2014.Common.Manifest
 open Rocksmith2014.DD
 open Rocksmith2014.DLCProject
 open Rocksmith2014.DLCProject.PackageBuilder
+open Rocksmith2014.EOF
 open Rocksmith2014.PSARC
 open Rocksmith2014.SNG
 open Rocksmith2014.XML
@@ -34,7 +36,8 @@ type Options =
       OutDir: string option
       WwisePath: string option
       Platforms: Platform list
-      AutoVolume: bool }
+      AutoVolume: bool
+      Ogg: string }
 
 let private parseArgs (argv: string array) =
     if argv.Length < 2 then
@@ -51,6 +54,7 @@ let private parseArgs (argv: string array) =
                 loop (i + 2) { opts with WwisePath = (if String.IsNullOrWhiteSpace(path) then None else Some path) }
             | "--mac" -> loop (i + 1) { opts with Platforms = [ PC; Mac ] }
             | "--auto-volume" -> loop (i + 1) { opts with AutoVolume = true }
+            | "--ogg" when i + 1 < argv.Length -> loop (i + 2) { opts with Ogg = argv[i + 1] }
             | other -> fail $"Unknown argument: %s{other}"
 
     loop 2
@@ -59,7 +63,8 @@ let private parseArgs (argv: string array) =
           OutDir = None
           WwisePath = None
           Platforms = [ PC ]
-          AutoVolume = false }
+          AutoVolume = false
+          Ogg = "guitar.ogg" }
 
 let private loadDefaultBassTone () =
     use stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("default_bass.json")
@@ -161,8 +166,9 @@ let private calculateVolumes (project: DLCProject) =
         AudioFile = volume project.AudioFile
         AudioPreviewFile = volume project.AudioPreviewFile }
 
-/// Opens a built package and checks that every instrumental SNG has exactly one difficulty level.
-let private verifyPackage (path: string) =
+/// Opens a built package and checks that every instrumental SNG has exactly one difficulty level
+/// (and, when given, as many notes as the source XML).
+let private verifyPackageWith (expectedNotes: int option) (path: string) =
     async {
         use psarc = PSARC.OpenFile(path)
         let platform = if path.EndsWith("_m.psarc", StringComparison.OrdinalIgnoreCase) then Mac else PC
@@ -180,9 +186,24 @@ let private verifyPackage (path: string) =
                 log $"VERIFY %s{name}: levels=%d{sng.Levels.Length} maxDifficulty=%d{maxDiff} notes=%d{notes}"
                 if sng.Levels.Length <> 1 || maxDiff <> 0 then ok <- false
 
+                match expectedNotes with
+                | Some expected when expected <> notes ->
+                    log $"VERIFY WARNING: the arrangement XML has %d{expected} notes but the package has %d{notes}"
+                | _ -> ()
+
         log $"VERIFY files=%d{psarc.Manifest.Length} sng=%d{sngs.Length} wem=%d{wems}"
         return ok
     }
+
+let private verifyPackage = verifyPackageWith None
+
+let private xmlNoteCount (project: DLCProject) =
+    project.Arrangements
+    |> List.tryPick (function
+        | Instrumental inst ->
+            let xml = InstrumentalArrangement.Load(inst.XmlPath)
+            Some(xml.Levels |> Seq.sumBy (fun l -> l.Notes.Count + l.Chords.Count))
+        | _ -> None)
 
 let private build (opts: Options) =
     let project = loadProject opts.Target
@@ -212,7 +233,9 @@ let private build (opts: Options) =
           GenerateDD = false // the whole point: one level, the full chart, always
           ForcePhraseCreation = false
           DDConfig = { PhraseSearchThreshold = None; LevelCountGeneration = LevelCountGeneration.Simple }
-          ApplyImprovements = false
+          // DLC Builder's default: crowd events, removal of beats after the audio, EOF fixes...
+          // None of these add difficulty levels.
+          ApplyImprovements = true
           SaveDebugFiles = false
           AudioConversionTask = conversion
           IdResetConfig = None
@@ -233,7 +256,7 @@ let private build (opts: Options) =
 
     for path in paths do
         log $"BUILT %s{path}"
-        if not (verifyPackage path |> Async.RunSynchronously) then allOk <- false
+        if not (verifyPackageWith (xmlNoteCount project) path |> Async.RunSynchronously) then allOk <- false
 
     if not allOk then fail "Verification failed: the package contains more than one difficulty level."
 
@@ -248,6 +271,17 @@ let main argv =
             let project = loadProject opts.Target
             validate project
             checkArrangements project |> ignore
+        | "eof" ->
+            // An EOF (Editor On Fire) project of the arrangement, for editing the chart by hand.
+            let xml = InstrumentalArrangement.Load(opts.Target)
+            let target = opts.OutDir |> Option.defaultValue (Path.ChangeExtension(opts.Target, ".eof"))
+            let tracks =
+                { PartGuitar = Array.empty
+                  PartBass = [| { Data = xml; CustomName = Path.GetFileNameWithoutExtension(opts.Target).Replace("_RS2", "") } |]
+                  PartBonus = None
+                  PartVocals = None }
+            EOFProjectWriter.writeEofProject opts.Ogg target tracks
+            log $"EOF project: %s{target}"
         | "verify" ->
             if not (verifyPackage opts.Target |> Async.RunSynchronously) then fail "Package has more than one difficulty level."
         | other -> fail $"Unknown command: %s{other}"

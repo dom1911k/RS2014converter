@@ -173,9 +173,27 @@ def _clean(beats: np.ndarray, downbeats: np.ndarray) -> tuple[np.ndarray, np.nda
             db[i] = True
     if not db.any():
         db[::4] = True
+    db = _regularize_bars(db)
     # Beats before the first downbeat belong to a pickup measure; make sure beat 0 starts one.
     db[0] = True
     return beats, db
+
+
+def _regularize_bars(db: np.ndarray) -> np.ndarray:
+    """Fill in downbeats the tracker missed: a bar exactly 2x/3x the usual length is split."""
+    idx = np.flatnonzero(db)
+    if len(idx) < 3:
+        return db
+    lengths = np.diff(idx)
+    vals, counts = np.unique(lengths, return_counts=True)
+    usual = int(vals[np.argmax(counts)])
+    if usual < 2:
+        return db
+    out = db.copy()
+    for start, length in zip(idx[:-1], lengths):
+        if length > usual and length % usual == 0:
+            out[start + usual:start + length:usual] = True
+    return out
 
 
 def _extend(beats: np.ndarray, db: np.ndarray, song_length: float) -> tuple[np.ndarray, np.ndarray]:
@@ -221,7 +239,7 @@ def _extend(beats: np.ndarray, db: np.ndarray, song_length: float) -> tuple[np.n
 def detect(mix_path: Path, cache_dir: Path, tracker: str = "beat_this", device: str = "auto",
            song_length: float | None = None, checkpoint: str = "final0") -> BeatMap:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = audio_io.file_hash(mix_path, f"beats:{tracker}:v2")
+    key = audio_io.file_hash(mix_path, f"beats:{tracker}:{checkpoint}:v3")
     cache = cache_dir / f"beats_{key}.json"
     if cache.exists():
         info(f"Beat map: using cached result ({cache.name})")
@@ -242,8 +260,10 @@ def detect(mix_path: Path, cache_dir: Path, tracker: str = "beat_this", device: 
         beats, downbeats = _track_librosa(mix_path)
 
     beats, db = _clean(beats, downbeats)
-    shifted = _refine(beats, mix_path)
-    beats = shifted
+    beats = _refine(beats, mix_path)
+    keep = beats > 0.0  # the latency correction can push a very early beat below zero
+    beats, db = beats[keep], db[keep]
+    db[0] = True
     times, flags = _extend(beats, db, song_length)
     bm = BeatMap(times, flags, source)
     if source == tracker:  # don't cache a fallback result: retry the real tracker next time

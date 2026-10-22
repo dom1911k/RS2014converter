@@ -17,6 +17,7 @@ DEFAULTS: dict = {
     "strings": 4,
     "bass_picked": False,
     "lead_in_seconds": 2.0,
+    "tuning_pitch": "auto",
     "separation": {"model": "htdemucs_ft", "shifts": 1},
     "beats": {"tracker": "beat_this", "checkpoint": "final0"},
     "transcription": {
@@ -28,9 +29,10 @@ DEFAULTS: dict = {
         "onset_sensitivity": 0.5,
         "min_sustain_beats": 0.75,
     },
-    "tab": {"min_sustain_beats": 1.0, "detect_tuning_shift": True},
+    "tab": {"min_sustain_beats": 1.0, "detect_tuning_shift": True, "snap_to_onsets": False,
+            "snap_tolerance": 0.04},
     "fingering": {"max_fret": 24, "shift_cost": 1.0, "height_cost": 0.06, "open_string_bonus": 0.15},
-    "sections": {"auto_detect": True, "min_bars": 4},
+    "sections": {"auto_detect": True, "min_bars": 4, "phrase_bars": 8},
     "check_mix": {"clicks": True, "synth_gain_db": 0.0, "split_file": True, "format": "wav"},
     "packaging": {
         "enabled": True,

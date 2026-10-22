@@ -7,7 +7,7 @@ import numpy as np
 from .model import Chart
 
 
-def synth_bass(chart: Chart, n_samples: int, sr: int) -> np.ndarray:
+def synth_bass(chart: Chart, n_samples: int, sr: int, cents: float = 0.0) -> np.ndarray:
     out = np.zeros(n_samples, np.float32)
     notes = chart.notes
     for i, n in enumerate(notes):
@@ -21,9 +21,10 @@ def synth_bass(chart: Chart, n_samples: int, sr: int) -> np.ndarray:
             continue
         length = min(length, n_samples - start)
         t = np.arange(length) / sr
-        f0 = 440.0 * 2 ** ((n.pitch - 69) / 12)
+        ref = 440.0 * 2 ** (cents / 1200)  # play in the recording's tuning reference
+        f0 = ref * 2 ** ((n.pitch - 69) / 12)
         if n.slide_to >= 0 and n.sustain > 0:
-            f1 = 440.0 * 2 ** ((n.pitch + (n.slide_to - n.fret) - 69) / 12)
+            f1 = ref * 2 ** ((n.pitch + (n.slide_to - n.fret) - 69) / 12)
             freq = f0 + (f1 - f0) * np.clip(t / max(dur, 1e-3), 0, 1)
             phase = 2 * np.pi * np.cumsum(freq) / sr
         else:
@@ -54,10 +55,10 @@ def clicks(chart: Chart, n_samples: int, sr: int) -> np.ndarray:
 
 
 def render(chart: Chart, mix: np.ndarray, stem: np.ndarray | None, sr: int, with_clicks: bool,
-           synth_gain_db: float = 0.0) -> tuple[np.ndarray, np.ndarray | None]:
+           synth_gain_db: float = 0.0, cents: float = 0.0) -> tuple[np.ndarray, np.ndarray | None]:
     """Returns (check mix stereo, split mix stereo [stem left / synth right] or None)."""
     n = mix.shape[1]
-    syn = synth_bass(chart, n, sr) * (10 ** (synth_gain_db / 20))
+    syn = synth_bass(chart, n, sr, cents) * (10 ** (synth_gain_db / 20))
     clk = clicks(chart, n, sr) if with_clicks else 0.0
     main = mix * 0.6 + (syn + clk)[None] * 0.8
     peak = np.abs(main).max()

@@ -109,6 +109,8 @@ Then run:
 make_cdlc.bat "C:\Songs\Song Title"
 ```
 
+Even simpler: drag the song folder onto **`drop_song_folder_here.bat`** in Explorer.
+
 The results go to an `output` folder inside the song folder. To redo the song after changing
 something, run the same command again. Separation and beat tracking are cached, so reruns are fast.
 
@@ -147,7 +149,8 @@ output\Band - Song Title\
     chart.gp5                       <- the chart as Guitar Pro tab (tempo follows the song)
     chart.mid                       <- the chart as MIDI (timed exactly like the audio)
   project\
-    arr_bass_RS2.xml                <- the Rocksmith arrangement (open/fix it in EOF)
+    arr_bass_RS2.xml                <- the Rocksmith arrangement
+    eof\notes.eof                   <- the same chart as an EOF project (to fix it by hand)
     Band_Song Title.rs2dlc          <- DLC Builder project (for rebuilding)
     audio.wav, cover.png, ids.json  <- inputs for the package (keep ids.json!)
 ```
@@ -172,8 +175,10 @@ output\Band - Song Title\
 * **Too many / too few notes without a tab** → in `config.yaml` change `transcription:
   min_confidence` (lower = more notes) or `onset_sensitivity` (higher = more repeated notes),
   or try `--grid 1/8` for simple lines.
-* **Fix notes by hand** in **EOF** (Editor On Fire): *File → Import → Rocksmith* and pick
-  `project\arr_bass_RS2.xml`. Fix it, then export with *File → Export → Rocksmith 2014* and save
+* **Fix notes by hand** in **EOF** (Editor On Fire, free): open `project\eof\notes.eof` (an EOF
+  project of the chart, with the song audio next to it), or use *File → Import → Rocksmith* on
+  `project\arr_bass_RS2.xml`. Fix it and save (EOF also writes the Rocksmith 2014 XML into the
+  `eof` folder when you save with Rocksmith export enabled, or use *File → Export*). Copy that XML
   over `project\arr_bass_RS2.xml`. Then rebuild only the package:
   ```
   build_psarc.bat "C:\Songs\Song\output\Band - Song\project\Band_Song.rs2dlc"
@@ -195,7 +200,7 @@ put `version: "2"` in `song.yaml`.
    bass sub-model runs, so it's 4× faster than the full model. Cached in the `cache` folder.
 2. **Beat map**: *Beat This!* (CPJKU, 2024, state of the art) finds beats and downbeats in the full mix. Every beat keeps its
    own time, so tempo drift, ritardandos etc. are followed exactly. A constant tracker latency is
-   corrected against the mix's onsets. The lead-in is detected (first sound, first beat); if the bass
+   corrected against the mix's onsets, and bars where the tracker missed a downbeat are split. The lead-in is detected (first sound, first beat); if the bass
    starts too early for a count-in, silence is added in front of the audio, and every time is shifted to match.
 3. **Notes**
    * *Tab*: Guitar Pro 3–8 is read (GP6/7/8 by a built-in reader). Repeats, alternate endings and
@@ -203,24 +208,34 @@ put `version: "2"` in `song.yaml`.
      classes + attacks), and dynamic time warping matches tab beats to the recording's beats. It also
      tries the beat grid at double/half tempo, and transpositions of ±5 semitones (to detect e.g. a recording
      tuned half a step down). Count-in bars before the music are dropped. Bars the recording has but the
-     tab doesn't are skipped (and reported). Techniques from the tab are kept: hammer-on/pull-off,
-     slides, palm mute, dead notes, harmonics, vibrato, bends, slap/pop, tapping, accents.
+     tab doesn't are skipped (and reported); the recording's own beats fill them, and also the
+     intro/outro outside the tab. Optionally (`tab: snap_to_onsets` in `config.yaml`), notes that are
+     clearly off the grid in the recording (15–40 ms) are nudged onto the attacks heard in the bass
+     stem. Techniques from the tab are kept:
+     hammer-on/pull-off, slides, palm mute, dead notes, harmonics, vibrato, bends, slap/pop, tapping, accents.
    * *No tab*: CREPE pitch tracking (GPU) and two onset detectors (spectral + energy re-attacks, so
      repeated notes of the same pitch are found) split the stem into notes. Octave errors are fixed
      using the bass register and the spectrum (a real low note has energy at its fundamental and fifth).
      Fragments are merged, very short/unsure notes dropped, then everything is snapped to the beat
-     map's grid. With synthetic test songs CREPE found 100% of the notes (pYIN, the fallback, ~88%).
+     map's grid. Notes that start without a new attack (legato) on the same string become hammer-ons /
+     pull-offs, or slides for bigger jumps. With synthetic test songs CREPE found 100% of the notes
+     (pYIN, the fallback, ~88%). If you give `--tuning`, its range is used for the octave checks.
 4. **Fingering**: a dynamic-programming optimiser picks string and fret for every note. It minimises
    hand position shifts (more strongly for fast passages), prefers low positions and open strings,
    and respects the tuning and string count. With a tab, the tab's fingering is kept.
 5. **Rocksmith files**: arrangement XML with beats synced to the audio, notes, sustains,
    techniques, tuning, hand anchors, phrases and sections. Sections come from the tab's markers, or
    are detected from the song's structure and named verse/chorus/bridge… (best effort).
+   Long sections are split into 8-bar phrases (Riff Repeater works per phrase).
    There is **one difficulty level**: every phrase has `maxDifficulty="0"`.
+   The recording's tuning reference is measured (e.g. A=432 Hz or a slightly fast/slow tape) and
+   stored as a cent offset, so the in-game tuner and note detection match the record.
 6. **Package**: `RsPackager` (in `packager\`) builds the `.psarc` with Rocksmith2014.NET. It does
    SNG conversion, encryption, manifests, preview clip, volume, album art and show lights, and
-   converts the audio with Wwise. DD generation is switched off. Afterwards it reopens the
-   package and checks that each arrangement has exactly one level. DLC Builder's arrangement checks run
+   converts the audio with Wwise. DD generation is switched off; DLC Builder's other default
+   "improvements" (crowd/applause events, EOF fixes, removing beats after the audio) are applied.
+   Afterwards it reopens the package and checks that each arrangement has exactly one level and as
+   many notes as the XML. DLC Builder's arrangement checks run
    too, and any issues are listed in `report.txt`.
 
 ### How the .psarc is built, and why not DLC Builder
@@ -271,7 +286,9 @@ To start completely fresh, delete the `.venv` and `cache` folders and run `setup
 * `tests\make_synthetic.py OUTDIR` makes a test song with a known bass line, drifting tempo, a GP5
   tab (with count-in and repeats) and a `truth.json`. `tests\evaluate.py OUTPUT_SONG_FOLDER truth.json`
   scores a result. Options: `--tuning-shift -1` (recording half a step down), `--form AABBBCDAA`
-  (recording has an extra bar), `--fundamental 0.12` (weak fundamental → octave-error test).
+  (recording has an extra bar), `--fundamental 0.12` (weak fundamental → octave-error test),
+  `--humanize 0.025` (bassist off the grid), `--cents -30` (A≈432 Hz), `--legato` (pull-offs).
+* `tests\regression.py WORKDIR` makes all test songs, runs every scenario and prints a score table.
 * `.venv\Scripts\python -m pytest tests` runs the unit tests.
 * `packager\publish\RsPackager.exe check project.rs2dlc` runs DLC Builder's checks on an
   arrangement. `RsPackager.exe verify file.psarc` shows the levels and notes in a package.

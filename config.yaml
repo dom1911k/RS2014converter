@@ -20,6 +20,10 @@ bass_picked: false
 # silence is added in front of the audio so Rocksmith has a count-in.
 lead_in_seconds: 2.0
 
+# Tuning reference of the recording. auto = measure it (many older records are not at A=440);
+# small deviations under 10 cents are ignored. Or give a frequency, e.g. 440 or 432.
+tuning_pitch: auto
+
 separation:
   model: htdemucs_ft      # best Demucs model for bass
   shifts: 1               # 2-5 = slightly better stems, proportionally slower
@@ -38,10 +42,15 @@ transcription:            # only used when there is no tab
 tab:
   min_sustain_beats: 1.0  # tab notes of a quarter note or longer get a sustain tail
   detect_tuning_shift: true  # detect a recording tuned differently from the tab (e.g. half step down)
+  # Nudge tab notes onto the attacks heard in the recording (15-40 ms off), for players who are
+  # clearly ahead of / behind the beat. Off = notes sit exactly on the beat grid (cleaner chart).
+  snap_to_onsets: false
+  snap_tolerance: 0.04
 
 sections:
   auto_detect: true       # without tab markers: find verse/chorus/... from the audio
   min_bars: 4
+  phrase_bars: 8          # long sections are split into phrases of this many bars (Riff Repeater)
 
 check_mix:
   clicks: true            # metronome clicks on the beat map (high click = first beat of a bar)

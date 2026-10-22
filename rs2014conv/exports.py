@@ -128,45 +128,53 @@ def write_gp5(path: Path, chart: Chart, title: str, artist: str, album: str, off
     song.measureHeaders = []
     track.measures = []
 
-    # Quantize each note to 1/16 or 1/16-triplet within its beat (in ticks).
-    def beat_pos(t: float) -> float:
-        return _time_to_beat(chart, t)
+    def ts_at(t: float):
+        cur = None
+        for ts in chart.time_signatures:
+            if ts.time <= t + 1e-3:
+                cur = ts
+        return cur
 
-    note_ticks = []
-    for n in chart.notes:
-        bp = beat_pos(n.time)
-        b = int(np.floor(bp))
-        frac = bp - b
-        straight = round(frac * 4) / 4
-        trip = round(frac * 6) / 6
-        f = straight if abs(straight - frac) <= abs(trip - frac) + 0.01 else trip
-        note_ticks.append((int(round((b + f) * 960)), n))
+    note_beats = [(_time_to_beat(chart, n.time), i, n) for i, n in enumerate(chart.notes)]
+    legato_from = {i - 1 for i, n in enumerate(chart.notes) if i and (n.hammer_on or n.pull_off)}
 
     start_tick = gp.Duration.quarterTime
     tempo_prev = None
     ni = 0
     for mi, (b0, nb) in enumerate(measures):
+        # A beat is a quarter note, or a dotted quarter in compound meters (6/8, 9/8, 12/8).
+        ts = ts_at(bt[b0])
+        compound = ts is not None and ts.denominator == 8 and ts.numerator % 3 == 0 and ts.numerator == nb * 3
+        beat_ticks = 1440 if compound else 960
         header = gp.MeasureHeader(number=mi + 1, start=start_tick)
-        header.timeSignature.numerator = nb
-        header.timeSignature.denominator.value = 4
+        header.timeSignature.numerator = nb * 3 if compound else nb
+        header.timeSignature.denominator.value = 8 if compound else 4
         song.measureHeaders.append(header)
         measure = gp.Measure(track, header)
         track.measures.append(measure)
         voice = measure.voices[0]
-        m_start, m_end = b0 * 960, (b0 + nb) * 960
-        # Tempo of this measure
+        m_len = nb * beat_ticks
+        # Tempo of this measure (GP tempo is always in quarter notes per minute)
         t0 = bt[b0]
         t1 = bt[b0 + nb] if b0 + nb < len(bt) else bt[-1] + (bt[-1] - bt[-2])
-        bpm = int(round(60.0 * nb / max(1e-3, t1 - t0)))
+        bpm = int(round(60.0 * nb * beat_ticks / 960 / max(1e-3, t1 - t0)))
         notes_here = []
-        while ni < len(note_ticks) and note_ticks[ni][0] < m_end:
-            if note_ticks[ni][0] >= m_start:
-                notes_here.append(note_ticks[ni])
+        while ni < len(note_beats) and note_beats[ni][0] < b0 + nb - 1e-6:
+            bp, idx, n = note_beats[ni]
+            if bp >= b0 - 1e-6:
+                local = (bp - b0) * beat_ticks
+                if compound:
+                    tk = round(local / 240) * 240  # 1/16 grid
+                else:
+                    straight, trip = round(local / 240) * 240, round(local / 160) * 160
+                    tk = straight if abs(straight - local) <= abs(trip - local) + 10 else trip
+                if not notes_here or tk > notes_here[-1][0]:
+                    notes_here.append((int(min(tk, m_len - 60)), idx, n))
             ni += 1
-        pos = m_start
+        pos = 0
         first_beat = True
 
-        def add_beat(ticks_len, note=None):
+        def add_beat(ticks_len, note=None, idx=-1):
             nonlocal first_beat
             for d_ticks, value, dotted, tup in _split(ticks_len):
                 beat = gp.Beat(voice)
@@ -180,10 +188,11 @@ def write_gp5(path: Path, chart: Chart, title: str, artist: str, album: str, off
                 if note is not None:
                     beat.status = gp.BeatStatus.normal
                     s = len(tuning) - note.string  # GP: 1 = highest string
-                    gn = gp.Note(beat, value=note.fret, string=s, type=gp.NoteType.dead if note.mute else gp.NoteType.normal)
+                    gn = gp.Note(beat, value=note.fret, string=s,
+                                 type=gp.NoteType.dead if note.mute else gp.NoteType.normal)
                     gn.effect.palmMute = note.palm_mute
                     gn.effect.vibrato = note.vibrato
-                    gn.effect.hammer = False
+                    gn.effect.hammer = idx in legato_from
                     if note.slide_to >= 0:
                         gn.effect.slides = [gp.SlideType.shiftSlideTo]
                     beat.notes.append(gn)
@@ -192,24 +201,25 @@ def write_gp5(path: Path, chart: Chart, title: str, artist: str, album: str, off
                     beat.status = gp.BeatStatus.rest
                 voice.beats.append(beat)
 
-        for k, (tk, n) in enumerate(notes_here):
+        for k, (tk, idx, n) in enumerate(notes_here):
             if tk > pos:
                 add_beat(tk - pos)
                 pos = tk
-            nxt = notes_here[k + 1][0] if k + 1 < len(notes_here) else m_end
+            nxt = notes_here[k + 1][0] if k + 1 < len(notes_here) else m_len
             length = max(60, nxt - tk)
             if n.sustain <= 0:
                 length = min(length, 480)
-            add_beat(length, n)
+            add_beat(length, n, idx)
             pos = tk + sum(d[0] for d in _split(length))
-        if pos < m_end:
-            add_beat(m_end - pos)
+        if pos < m_len:
+            add_beat(m_len - pos)
         if not voice.beats:
-            add_beat(nb * 960)
+            add_beat(m_len)
         tempo_prev = bpm
-        start_tick += nb * 960
-    if measures:
-        song.tempo = int(round(60.0 * measures[0][1] / max(1e-3, (bt[measures[0][0] + measures[0][1]] - bt[0]))))
+        start_tick += m_len
+        if mi == 0:
+            song.tempo = bpm
+
     try:
         gp.write(song, str(path))
     except Exception as e:  # noqa: BLE001
