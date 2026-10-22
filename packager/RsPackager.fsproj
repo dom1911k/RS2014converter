@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Headless CDLC packager built on Rocksmith2014.NET (the library behind DLC Builder). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
+    <Nullable>disable</Nullable>
+    <WarnOn>3390;$(WarnOn)</WarnOn>
+    <AssemblyName>RsPackager</AssemblyName>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\third_party\Rocksmith2014.NET\samples\DLCBuilder.Domain\Tones\default_bass.json" LogicalName="default_bass.json" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\third_party\Rocksmith2014.NET\src\Rocksmith2014.Audio\Rocksmith2014.Audio.fsproj" />
+    <ProjectReference Include="..\third_party\Rocksmith2014.NET\src\Rocksmith2014.DLCProject\Rocksmith2014.DLCProject.fsproj" />
+  </ItemGroup>
+
+</Project>

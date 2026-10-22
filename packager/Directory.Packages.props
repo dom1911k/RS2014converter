@@ -1,0 +1,4 @@
+<Project>
+  <!-- Reuse the package versions pinned by Rocksmith2014.NET. -->
+  <Import Project="..\third_party\Rocksmith2014.NET\Directory.Packages.props" />
+</Project>

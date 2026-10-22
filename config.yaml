@@ -1,0 +1,58 @@
+# make_cdlc settings. Everything here is optional: delete a line to get the default.
+# Per-song settings go in the song folder's song.yaml (they override these).
+
+# Your name: shown as the CDLC author, and the first 2 letters start the DLC key.
+charter_name: make_cdlc
+
+# Where results go. Empty = an "output" folder next to the audio (or inside the song folder).
+output_dir: ""
+
+# auto = use the GPU (CUDA) if available, otherwise CPU. Can be: auto, cuda, cpu
+device: auto
+
+# Strings on your bass, used when the tuning has to be guessed (4 or 5).
+strings: 4
+
+# true = the arrangement is marked as "picked" in Rocksmith (cosmetic; no effect on notes)
+bass_picked: false
+
+# Minimum empty time before the first note. If the song starts with bass right away,
+# silence is added in front of the audio so Rocksmith has a count-in.
+lead_in_seconds: 2.0
+
+separation:
+  model: htdemucs_ft      # best Demucs model for bass
+  shifts: 1               # 2-5 = slightly better stems, proportionally slower
+
+beats:
+  tracker: beat_this      # beat_this (best) or librosa (simple fallback)
+
+transcription:            # only used when there is no tab
+  pitch_method: crepe     # crepe (best in tests) or pyin
+  grid: "1/16"            # 1/8, 1/16, 1/8T, 1/16T, or 1/16+T (straight 1/16 or triplets, chosen per beat)
+  min_note: 0.06          # seconds; shorter detected notes are dropped
+  min_confidence: 0.45    # 0-1; lower = keep more uncertain notes
+  onset_sensitivity: 0.5  # 0-1; higher = more note starts detected (repeated notes)
+  min_sustain_beats: 0.75 # notes at least this long (in beats) get a sustain tail in Rocksmith
+
+tab:
+  min_sustain_beats: 1.0  # tab notes of a quarter note or longer get a sustain tail
+  detect_tuning_shift: true  # detect a recording tuned differently from the tab (e.g. half step down)
+
+sections:
+  auto_detect: true       # without tab markers: find verse/chorus/... from the audio
+  min_bars: 4
+
+check_mix:
+  clicks: true            # metronome clicks on the beat map (high click = first beat of a bar)
+  synth_gain_db: 0.0      # louder/quieter synth bass in the check mix
+  split_file: true        # also write check_bass_vs_chart.wav (stem left, chart right)
+
+packaging:
+  enabled: true
+  wwise_console: ""       # leave empty to auto-detect Wwise 2023 in Program Files
+  auto_volume: true       # set the in-game volume from the song's loudness (like DLC Builder)
+  mac: false              # also build a Mac package
+  # Copy the finished .psarc here, e.g. your Rocksmith dlc folder:
+  # copy_to_folder: 'C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014\dlc'
+  copy_to_folder: ""

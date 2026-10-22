@@ -1,0 +1,25 @@
+# Put this file in a folder together with the song's audio file (and optionally a tab,
+# a bass stem and a cover image), then run:   make_cdlc.bat "path\to\the folder"
+#
+# Only title and artist are required. Files are found automatically if there is just one
+# audio file / tab / image in the folder; name them here if you want to be explicit.
+
+title: My Song
+artist: Some Band
+album: Some Album        # optional
+year: 1999               # optional
+
+# audio: song.flac        # optional, auto-detected
+# tab: bass.gp5           # optional, auto-detected (.gp3/.gp4/.gp5/.gpx/.gp; text tabs must be named here)
+# track: 3                # optional: track number in the tab if the bass isn't found automatically
+# stem: bass_stem.wav     # optional: an isolated bass track (skips separation)
+# tuning: Drop D          # optional: e.g. E Standard, Drop D, Eb Standard, D Standard, B E A D G
+# strings: 5              # optional: for tuning guesses on a 5-string
+# cover: cover.jpg        # optional, auto-detected
+# grid: 1/16+T            # optional, no-tab only: 1/8, 1/16, 1/8T, 1/16T, 1/16+T
+# bass_picked: true       # optional
+# version: "2"            # optional: bump when you re-release a fixed version
+
+# Any setting from config.yaml can also be overridden for this song, e.g.:
+# transcription:
+#   onset_sensitivity: 0.7
