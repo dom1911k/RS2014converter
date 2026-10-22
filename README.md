@@ -256,6 +256,18 @@ The `.rs2dlc` project file is still written, in case you want to open the song i
 change the tone). If you build from DLC Builder, use **Build → Test** with **Generate DD levels**
 unticked in its configuration. A **Release** build from DLC Builder adds DD.
 
+### Japanese (and other non-Latin) titles
+
+Titles and artists can be written in Japanese: the game's font has kana and the common kanji
+(if a character is missing, the packager warns). The sort names and the internal DLC key need
+Latin letters, so they're romanized automatically (e.g. 自由のショート → "Jiyuu No Shooto").
+
+### Timing check
+
+At the end, the chart is compared with the attacks of the real bass (the click of each pluck). If the
+whole chart is consistently early or late, it's shifted (`sync_to_bass` in `config.yaml`). The
+report says how far off it was.
+
 ### Tunings, 5-string and low tunings
 
 * Rocksmith basses have 4 strings; tunings are stored as offsets from E standard.
@@ -310,6 +322,7 @@ Code layout: `make_cdlc.py` (command line) → `rs2014conv\pipeline.py` (all ste
 * [Beat This!](https://github.com/CPJKU/beat_this) (MIT): beat tracking
 * [torchcrepe](https://github.com/maxrmorrison/torchcrepe) (MIT): pitch tracking
 * [librosa](https://librosa.org) (ISC), [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) (LGPL), [mido](https://github.com/mido/mido) (MIT)
+* [pykakasi](https://codeberg.org/miurahr/pykakasi) (GPL-3): romaji for Japanese titles
 * Wwise is © Audiokinetic and is installed separately under its own licence.
 
 Use this for songs you own, for personal practice.

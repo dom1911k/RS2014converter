@@ -98,6 +98,7 @@ class StemFeatures:
         on = librosa.onset.onset_strength(y=y, sr=SR, hop_length=self.hop)
         self.onset = on / (np.percentile(on, 99) + 1e-9)
         self.energy = C.sum(0)
+        self.rms = librosa.feature.rms(y=y, hop_length=self.hop)[0]  # linear level, for silent tab bars
         self.silence = self.energy < 0.05 * np.percentile(self.energy, 90)
 
     def frame(self, t: np.ndarray) -> np.ndarray:
@@ -308,6 +309,14 @@ def align(lt: LinearTab, tuning: list[int], stem_path, bm: BeatMap, try_shifts: 
     finite = beat_cost[np.isfinite(beat_cost)]
     med = float(np.median(finite)) if len(finite) else 0.0
     mad = float(np.median(np.abs(finite - med))) + 1e-3 if len(finite) else 0.1
+    def stem_level(t0: float, t1: float) -> float:
+        a, b = feats.frame(np.array([t0, t1]))
+        return float(np.sqrt(np.mean(feats.rms[a:max(a + 1, b)] ** 2)))
+
+    # Typical stem level where the tab has bass, to judge bars where the tab has none.
+    played = [stem_level(times[mb], times[min(mb + m.beats, lt.total_beats)])
+              for m, mb in zip(lt.measures, lt.measure_start_beat) if m.notes]
+    typical = float(np.median(played)) if played else 1.0
     for mi, (m, mb) in enumerate(zip(lt.measures, lt.measure_start_beat)):
         sl = slice(mb, mb + m.beats)
         mc = beat_cost[sl]
@@ -315,7 +324,13 @@ def align(lt: LinearTab, tuning: list[int], stem_path, bm: BeatMap, try_shifts: 
         if not len(mc):
             continue
         reasons = []
-        if mc.mean() > max(0.55, med + 4 * mad):
+        if not m.notes:
+            # Tab is silent: only worth a look if the recording clearly has bass here
+            # (quiet bleed from other instruments in the separated stem doesn't count).
+            level = stem_level(times[mb], times[min(mb + m.beats, lt.total_beats)])
+            if level > 0.35 * typical:
+                reasons.append("the tab has no bass here, but the recording does")
+        elif mc.mean() > max(0.55, med + 4 * mad):
             reasons.append(f"tab and audio don't match well (cost {mc.mean():.2f})")
         rel = slice(max(0, mb - b_first), max(0, mb - b_first + m.beats))
         if extra_audio[rel].sum() >= 1:

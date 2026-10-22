@@ -18,6 +18,7 @@ DEFAULTS: dict = {
     "bass_picked": False,
     "lead_in_seconds": 2.0,
     "tuning_pitch": "auto",
+    "sync_to_bass": True,
     "separation": {"model": "htdemucs_ft", "shifts": 1},
     "beats": {"tracker": "beat_this", "checkpoint": "final0"},
     "transcription": {

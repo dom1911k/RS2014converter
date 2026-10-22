@@ -293,6 +293,25 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     chart = Chart(beats=beat_list, notes=notes, tuning_midi=chart_tuning, tuning_name=tuning_note,
                   time_signatures=tsigs, song_length=song_length, flagged=flagged)
 
+    # Line the chart up with the attacks of the real bass (pluck clicks in the stem).
+    if cfg.get("sync_to_bass", True) and notes:
+        from . import sync
+
+        offset, coverage, spread = sync.measure_offset(np.array([n.time for n in notes]),
+                                                       sync.attack_times(stem_path))
+        consistent = coverage >= 0.4 and spread <= 0.035
+        if consistent and 0.008 <= abs(offset) <= 0.08:
+            sync.shift_chart(chart, offset)
+            info(f"Chart moved {offset * 1000:+.0f} ms to line up with the bass attacks "
+                 f"({coverage * 100:.0f}% of notes have a clear attack)")
+            report.add(f"Timing: chart moved {offset * 1000:+.0f} ms to line up with the bass attacks "
+                       f"(measured on {coverage * 100:.0f}% of the notes)")
+        else:
+            info(f"Bass attacks vs chart: {offset * 1000:+.0f} ms (on {coverage * 100:.0f}% of notes) - no shift needed")
+            report.add(f"Timing: bass attacks vs chart {offset * 1000:+.0f} ms on {coverage * 100:.0f}% of notes"
+                       + ("" if consistent else " (not consistent enough to correct)"))
+        notes = chart.notes
+
     # Lead-in: Rocksmith needs an empty count-in before the first note.
     first_note = min((n.time for n in notes), default=song_length)
     lead = float(cfg["lead_in_seconds"])
@@ -472,7 +491,8 @@ def _write_eof(proj_dir: Path, audio_path: Path, xml_path: Path, cfg: dict) -> P
         r = subprocess.run(cmd + ["eof", str(xml_path), "--ogg", ogg.name, "--out", str(target)],
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if r.returncode != 0:
-            raise RuntimeError((r.stderr or r.stdout).strip())
+            msg = (r.stderr or r.stdout).strip().splitlines()
+            raise RuntimeError(msg[-1] if msg else f"exit code {r.returncode}")
         info(f"EOF project: {target}")
         return target
     except Exception as e:  # noqa: BLE001 - optional extra

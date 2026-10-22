@@ -114,7 +114,46 @@ def _track_librosa(mix_path: Path, stem_path: Path | None = None) -> tuple[np.nd
     beats = librosa.frames_to_time(frames, sr=sr, hop_length=hop)
     if len(beats) < 8:
         return beats, beats[::4]
+    beats = _repair_glitches(beats)
     return beats, _downbeats_from_features(beats, y, sr, stem_path)
+
+
+def _repair_glitches(beats: np.ndarray, window: int = 16, tol: float = 0.12, max_run: int = 10) -> np.ndarray:
+    """Short runs of beats whose spacing jumps away from the local tempo (the tracker briefly locks
+    onto a syncopation, e.g. 3/4 of the real beat) are replaced by evenly spaced beats at the local
+    tempo. A lasting tempo change is left alone: the local tempo follows it."""
+    beats = np.asarray(beats, float)
+    ibi = np.diff(beats)
+    n = len(ibi)
+    local = np.array([np.median(ibi[max(0, i - window // 2):min(n, i + window // 2 + 1)]) for i in range(n)])
+    bad = np.abs(ibi - local) > tol * local
+    out: list[float] = [beats[0]]
+    i = 0
+    fixed = 0
+    while i < n:
+        if not bad[i]:
+            out.append(beats[i + 1])
+            i += 1
+            continue
+        j = i
+        while j < n and bad[j]:
+            j += 1
+        a, b = beats[i], beats[j] if j < len(beats) else beats[-1]
+        before, after = ibi[max(0, i - window // 2):i], ibi[j:j + window // 2]
+        # Only a glitch if the tempo is the same before and after it (else it's a real change).
+        same_tempo = (len(before) >= 3 and len(after) >= 3
+                      and abs(np.median(before) - np.median(after)) < 0.06 * np.median(before))
+        ref = float(np.median(np.concatenate([before, after]))) if same_tempo else 0.0
+        k = int(round((b - a) / ref)) if ref > 0 else 0
+        if same_tempo and j - i <= max_run and k >= 1 and abs((b - a) / k - ref) < 0.08 * ref:
+            out.extend(a + (b - a) * m / k for m in range(1, k + 1))
+            fixed += 1
+        else:
+            out.extend(beats[i + 1:j + 1])
+        i = j
+    if fixed:
+        info(f"Repaired {fixed} short glitch(es) in the beat grid")
+    return np.array(out)
 
 
 def _smooth_tempo_octaves(local: np.ndarray, jump_cost: float = 4.0, prior_cost: float = 0.3) -> np.ndarray:
@@ -340,7 +379,7 @@ def _extend(beats: np.ndarray, db: np.ndarray, song_length: float) -> tuple[np.n
 def detect(mix_path: Path, cache_dir: Path, tracker: str = "beat_this", device: str = "auto",
            song_length: float | None = None, checkpoint: str = "final0", stem_path: Path | None = None) -> BeatMap:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = audio_io.file_hash(mix_path, f"beats:{tracker}:{checkpoint}:v4")
+    key = audio_io.file_hash(mix_path, f"beats:{tracker}:{checkpoint}:v5")
     cache = cache_dir / f"beats_{key}.json"
     if cache.exists():
         info(f"Beat map: using cached result ({cache.name})")

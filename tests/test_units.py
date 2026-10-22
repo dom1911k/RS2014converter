@@ -166,3 +166,29 @@ def test_five_string_tab_is_charted_on_four_strings():
     assert [chart_tuning[n.string] + n.fret for n in chart_notes] == [23, 28, 45, 52]
     offsets, _ = tuning.rocksmith_offsets(tun5)
     assert offsets[:4] == [-5, -5, -5, -5]
+
+
+def test_beat_glitch_repaired_but_tempo_change_kept():
+    from rs2014conv.beats import _repair_glitches
+
+    steady = np.arange(0, 10, 0.476)
+    glitch = np.concatenate([steady, 10 + np.arange(0, 2.5, 0.36), 12.9 + np.arange(0, 8, 0.476)])
+    fixed = _repair_glitches(glitch)
+    assert np.abs(np.diff(fixed) - 0.476).max() < 0.06
+    change = np.concatenate([np.arange(0, 20, 0.5), 20 + np.arange(1, 40) * 0.4])
+    assert np.allclose(_repair_glitches(change), change)
+
+
+def test_japanese_titles(tmp_path):
+    from rs2014conv import exports, project
+    from rs2014conv.text import romanize
+
+    assert romanize("自由のショート") == "Jiyuu No Shooto"
+    assert project.sort_value("自由のショート") == "Jiyuu No Shooto"
+    assert project.dlc_key("me", "haku.", "自由のショート") == "mehakuJiyuu"
+    beats = [Beat(1.0 + 0.5 * i, (i // 4 + 1) if i % 4 == 0 else -1) for i in range(16)]
+    chart = Chart(beats=beats, notes=[Note(2.0, 0, 40, string=2, fret=2)], tuning_midi=[28, 33, 38, 43],
+                  tuning_name="E", time_signatures=[TimeSignatureEvent(1.0, 4, 4)], song_length=9.0)
+    exports.write_midi(tmp_path / "a.mid", chart, "自由のショート")  # used to crash (latin-1)
+    exports.write_gp5(tmp_path / "a.gp5", chart, "自由のショート", "haku.", "", [0] * 6)
+    assert (tmp_path / "a.mid").exists() and (tmp_path / "a.gp5").exists()

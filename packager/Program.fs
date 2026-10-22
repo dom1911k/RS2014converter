@@ -106,6 +106,13 @@ let private validate (project: DLCProject) =
     if String.IsNullOrWhiteSpace project.ArtistName.Value then fail "Artist name is empty."
     if not (File.Exists project.AlbumArtFile) then fail $"Album art not found: %s{project.AlbumArtFile}"
 
+    // The game's fonts only contain some characters (Latin, kana, common kanji...).
+    for name, value in [ "Title", project.Title.Value; "Artist", project.ArtistName.Value; "Album", project.AlbumName.Value ] do
+        let shown = StringValidator.field value
+        if shown <> value then
+            let missing = value |> Seq.filter (fun c -> not (shown.Contains c)) |> Seq.distinct |> Seq.map string |> String.concat " "
+            log $"WARNING: %s{name} contains characters the game can't display (shown as gaps): %s{missing}"
+
 /// Runs DLC Builder's arrangement checks and prints the issues. Returns the number of issues.
 let private timeFormat = @"m\:ss\.fff"
 

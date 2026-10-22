@@ -10,8 +10,11 @@ from pathlib import Path
 
 
 def sort_value(text: str) -> str:
-    """Like DLC Builder: drop a leading 'The ', keep letters/digits/spaces."""
-    t = re.sub(r"^(the)\s+", "", text.strip(), flags=re.I)
+    """Like DLC Builder: drop a leading 'The ', keep letters/digits/spaces. Non-Latin titles
+    (e.g. Japanese) are romanized, because the game's sort fields must start with A-Z/0-9."""
+    from .text import romanize
+
+    t = re.sub(r"^(the)\s+", "", romanize(text.strip()), flags=re.I)
     t = re.sub(r"[^A-Za-z0-9 ]", "", t).strip()
     return t[:1].upper() + t[1:] if t else text
 
@@ -20,8 +23,10 @@ def dlc_key(charter: str, artist: str, title: str) -> str:
     def part(s: str, n: int) -> str:
         return re.sub(r"[^A-Za-z0-9]", "", s)[:n]
 
-    prefix = part(charter, 2) or "MC"
-    a, t = part(artist, 5), part(title, 5)
+    from .text import romanize
+
+    prefix = part(romanize(charter), 2) or "MC"
+    a, t = part(romanize(artist), 5), part(romanize(title), 5)
     key = prefix + a + t
     if len(a) + len(t) < 6:
         # Titles/artists without Latin letters (e.g. Japanese) would all get the same key.

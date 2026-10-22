@@ -24,6 +24,10 @@ lead_in_seconds: 2.0
 # small deviations under 10 cents are ignored. Or give a frequency, e.g. 440 or 432.
 tuning_pitch: auto
 
+# Final timing check: if the chart is consistently early/late against the attacks of the real bass
+# (the click of the pluck), shift the whole chart by that amount.
+sync_to_bass: true
+
 separation:
   model: htdemucs_ft      # best Demucs model for bass
   shifts: 1               # 2-5 = slightly better stems, proportionally slower

@@ -29,7 +29,7 @@ def _time_to_beat(chart: Chart, t: float) -> float:
 def write_midi(path: Path, chart: Chart, title: str) -> None:
     import mido
 
-    mid = mido.MidiFile(ticks_per_beat=PPQ)
+    mid = mido.MidiFile(ticks_per_beat=PPQ, charset="utf-8")  # titles may be Japanese etc.
     tempo = mido.MidiTrack()
     mid.tracks.append(tempo)
     tempo.append(mido.MetaMessage("track_name", name=title, time=0))
@@ -113,7 +113,10 @@ def write_gp5(path: Path, chart: Chart, title: str, artist: str, album: str, off
 
     tuning = chart.tuning_midi[:4] if len(chart.tuning_midi) >= 4 else chart.tuning_midi
     song = gp.Song()
-    song.title, song.artist, song.album = title, artist, album
+    from .text import romanize
+
+    # Guitar Pro 5 stores text as Windows-1252: use Latin letters.
+    song.title, song.artist, song.album = romanize(title), romanize(artist), romanize(album)
     song.tracks = []
     # Measures from the beat map: [start_beat_index, beats]
     dbs = [i for i, b in enumerate(chart.beats) if b.measure >= 0] + [len(chart.beats)]
