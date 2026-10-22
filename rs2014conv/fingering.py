@@ -21,8 +21,8 @@ class FingeringConfig:
     span: int = 4
     shift_cost: float = 1.0
     shift_per_fret: float = 0.25
-    height_cost: float = 0.06
-    string_jump_cost: float = 0.12
+    height_cost: float = 0.01  # tuned on a real tab: bassists stay in position rather than go low
+    string_jump_cost: float = 0.3  # ...and avoid skipping strings
     open_string_bonus: float = 0.15
     high_open_penalty: float = 0.4
     legato_string_change: float = 2.5  # hammer-ons/pull-offs/slides need the previous note's string

@@ -159,7 +159,33 @@ def _onsets(y: np.ndarray, sensitivity: float) -> np.ndarray:
             i = j + wait
         else:
             i += 1
-    allf = np.sort(np.concatenate([spectral, np.array(energy, dtype=int)]))
+    # Pluck clicks: the bright, short transient of finger/pick on the string (above 1 kHz). They
+    # mark repeated notes of the same pitch that the level and the pitch don't reveal.
+    S = np.abs(librosa.stft(y, n_fft=512, hop_length=HOP))
+    freqs = librosa.fft_frequencies(sr=SR, n_fft=512)
+    click_env = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S[freqs >= 1000]), sr=SR,
+                                             hop_length=HOP, n_fft=512, lag=1, max_size=1)
+    clicks = librosa.onset.onset_detect(onset_envelope=click_env, sr=SR, hop_length=HOP, backtrack=False,
+                                        units="frames", delta=0.1 + 0.1 * (1 - sensitivity), wait=wait)
+    # A finger/pick on a bass string clicks mostly at 1-3 kHz; hi-hat/cymbal bleed in the stem is
+    # brighter. Keep clicks whose new energy is clearly mid-band (measured on a real song:
+    # plucks median +15 dB, bleed about +2 dB).
+    mid, high = (freqs >= 1000) & (freqs < 3000), freqs >= 4000
+    keep = []
+    for c in clicks:
+        rise = np.maximum(S[:, c:c + 3].mean(1) - S[:, max(0, c - 6):max(1, c - 2)].mean(1), 0.0)
+        if 20 * np.log10((rise[mid].sum() + 1e-9) / (rise[high].sum() + 1e-9)) > 3.0:
+            keep.append(c)
+    clicks = np.array(keep, dtype=int)
+    # A pluck's click comes first and its low end swells in up to ~90 ms later; the level/spectral
+    # detectors then fire a second time for the same note. With a click, those are dropped.
+    follow = int(0.09 * SR / HOP)
+    others = np.concatenate([spectral, np.array(energy, dtype=int)])
+    if len(clicks):
+        idx = np.searchsorted(clicks, others, side="right") - 1
+        prev_click = np.where(idx >= 0, clicks[np.clip(idx, 0, None)], -10 ** 9)
+        others = others[(others - prev_click) > follow]
+    allf = np.sort(np.concatenate([others, clicks]))
     out: list[int] = []
     for f in allf:
         if not out or f - out[-1] > int(0.04 * SR / HOP):
@@ -224,6 +250,11 @@ def _segment(midi: np.ndarray, voiced: np.ndarray, conf: np.ndarray, rms: np.nda
         core = pitches[len(pitches) // 5: max(len(pitches) // 5 + 1, 4 * len(pitches) // 5)]
         p = int(round(float(np.median(core))))
         c = float(np.mean(conf[seg][v]))
+        # The pitch tracker gets confident a little after a low note's attack: start the note at
+        # the attack heard just before (up to 80 ms earlier) if there is one.
+        before = onset_frames[(onset_frames <= start) & (onset_frames >= start - int(0.08 * SR / HOP))]
+        if len(before) and (not notes or before[-1] * HOP / SR > notes[-1].time + 0.03):
+            start = int(before[-1])
         note = Note(time=start * HOP / SR, sustain=(end - start) * HOP / SR, pitch=p, confidence=c)
         note._legato = not attack[start]  # type: ignore[attr-defined]
         notes.append(note)
@@ -261,6 +292,39 @@ def apply_legato(notes: list[Note], max_hopo_frets: int = 4) -> int:
 
 
 # --------------------------------------------------------------------------- post-processing
+
+def verify_semitones(notes: list[Note], y: np.ndarray, cents: float = 0.0) -> int:
+    """Check each note's pitch against its harmonics and move it by a semitone if the spectrum
+    clearly prefers the neighbour. (CREPE can read real low notes up to half a semitone off,
+    e.g. a C2 as 35.46 -> B1.) Returns the number of notes changed."""
+    changed = 0
+    nfft = 1 << 15  # zero-padded: ~0.5 Hz bins at 16 kHz, so even 60 Hz semitones are separable
+    freqs = np.fft.rfftfreq(nfft, 1.0 / SR)
+    ref = 440.0 * 2 ** (cents / 1200.0)
+    for n in notes:
+        a = n.time + (0.25 * n.sustain if n.sustain > 0.12 else 0.0)
+        b = n.time + max(0.08, 0.9 * n.sustain)
+        seg = y[int(a * SR):int(b * SR)]
+        if len(seg) < int(0.05 * SR):
+            continue
+        spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg)), nfft))
+
+        def score(q: int) -> float:
+            f0 = ref * 2 ** ((q - 69) / 12)
+            total = 0.0
+            for h in range(1, 7):
+                band = (freqs > h * f0 * 0.985) & (freqs < h * f0 * 1.015)
+                if band.any():
+                    total += float(spec[band].max()) / np.sqrt(h)
+            return total
+
+        cur = score(n.pitch)
+        best = max((n.pitch - 1, n.pitch + 1), key=score)
+        if score(best) > 1.25 * cur:
+            n.pitch = best
+            changed += 1
+    return changed
+
 
 def fix_octaves(notes: list[Note], spec: BassSpectrum, lowest: int, highest: int) -> int:
     """Correct octave errors. Returns the number of changed notes."""
@@ -426,6 +490,7 @@ def transcribe(stem_path, bm: BeatMap, cfg: TranscribeConfig, cache_dir=None) ->
     notes = _segment(midi, voiced, conf, rms40, onset_frames, cfg)
     raw_count = len(notes)
 
+    semitone_fixes = verify_semitones(notes, y)
     spec = BassSpectrum(y)
     octave_fixes = fix_octaves(notes, spec, cfg.lowest_pitch, cfg.highest_pitch)
     notes = merge_fragments(notes, cfg.merge_gap, onset_times)
@@ -434,7 +499,8 @@ def transcribe(stem_path, bm: BeatMap, cfg: TranscribeConfig, cache_dir=None) ->
     pre_q = len(notes)
     notes = quantize(notes, bm, cfg.grid, cfg.min_sustain_beats)
     stats = {"method": method, "raw_segments": raw_count, "octave_fixes": octave_fixes,
+             "semitone_fixes": semitone_fixes,
              "after_cleanup": pre_q, "final": len(notes)}
-    info(f"Transcription ({method}): {raw_count} raw segments, {octave_fixes} octave fixes, "
+    info(f"Transcription ({method}): {raw_count} raw segments, {semitone_fixes} semitone + {octave_fixes} octave fixes, "
          f"{len(notes)} notes after cleanup and quantization")
     return notes, stats

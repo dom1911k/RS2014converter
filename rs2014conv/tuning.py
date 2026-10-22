@@ -109,12 +109,12 @@ def guess_tuning(pitches: list[int], strings: int = 4) -> tuple[list[int], str, 
         base, name = parse_tuning("E Standard", strings)
         return base, name, "no notes detected; assuming E Standard"
     ordered = sorted(pitches)
-    # Ignore the lowest 1% as outliers (octave errors, noise), but need a few occurrences.
+    # The lowest note that is really played: a few stray low notes (slides, kick-drum bleed,
+    # octave errors) must not change the tuning, so it has to make up 2% of the notes.
     counts = Counter(ordered)
-    k = max(1, len(ordered) // 100)
-    candidates = [p for p in sorted(counts) if counts[p] >= 2 or len(ordered) < 30]
-    lowest = candidates[0] if candidates else ordered[0]
-    lowest = max(lowest, ordered[min(k, len(ordered) - 1)] if len(ordered) > 50 else lowest)
+    need = max(2, int(0.02 * len(ordered))) if len(ordered) >= 30 else 1
+    candidates = [p for p in sorted(counts) if counts[p] >= need]
+    lowest = candidates[0] if candidates else ordered[len(ordered) // 2]
 
     if strings == 5 or lowest <= 23:
         if lowest >= 23:

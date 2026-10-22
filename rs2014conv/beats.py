@@ -177,6 +177,10 @@ def _smooth_tempo_octaves(local: np.ndarray, jump_cost: float = 4.0, prior_cost:
     return out
 
 
+STEM_WEIGHT = 1.0  # weight of the bass-stem evidence relative to the mix evidence
+SHORT_BAR_PENALTY = 4.0  # an irregular (short) bar needs clear evidence
+
+
 def _downbeats_from_features(beats: np.ndarray, y: np.ndarray, sr: int, stem_path: Path | None) -> np.ndarray:
     """Pick the bar positions (meter 3 or 4, phase may shift at odd bars) with a Viterbi pass over
     per-beat evidence: harmonic change in the mix, bass-note change and attacks, low-end hits."""
@@ -201,17 +205,17 @@ def _downbeats_from_features(beats: np.ndarray, y: np.ndarray, sr: int, stem_pat
     def at_beats(curve: np.ndarray) -> np.ndarray:
         return np.array([curve[max(0, f - 2):f + 3].max() if f < len(curve) else 0.0 for f in frames])
 
-    feats = [change(chroma), at_beats(low_on)]
+    feats = [(change(chroma), 1.0), (at_beats(low_on), 1.0)]
     if stem_path is not None:
         ys = audio_io.load(stem_path, sr=sr, mono=True)[0]
         C = np.abs(librosa.cqt(ys, sr=sr, hop_length=hop, fmin=librosa.midi_to_hz(24), n_bins=48))
-        feats.append(change(C))
-        feats.append(at_beats(librosa.onset.onset_strength(y=ys, sr=sr, hop_length=hop)))
-    z = sum((f - f.mean()) / (f.std() + 1e-9) for f in feats) / len(feats)
+        feats.append((change(C), STEM_WEIGHT))
+        feats.append((at_beats(librosa.onset.onset_strength(y=ys, sr=sr, hop_length=hop)), STEM_WEIGHT))
+    z = sum(w * (f - f.mean()) / (f.std() + 1e-9) for f, w in feats) / sum(w for _, w in feats)
 
     best = None
     for meter in (4, 3):
-        score, path = _bar_viterbi(z, meter)
+        score, path = _bar_viterbi(z, meter, SHORT_BAR_PENALTY)
         # Normalise: average evidence per downbeat (more downbeats in 3/4 must not win by count)
         per_bar = score / max(1, sum(1 for s_ in path if s_ == 0))
         if meter == 3:

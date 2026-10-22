@@ -218,19 +218,26 @@ put `version: "2"` in `song.yaml`.
      clearly off the grid in the recording (15–40 ms) are nudged onto the attacks heard in the bass
      stem. Techniques from the tab are kept:
      hammer-on/pull-off, slides, palm mute, dead notes, harmonics, vibrato, bends, slap/pop, tapping, accents.
-   * *No tab*: CREPE pitch tracking (GPU) and two onset detectors (spectral + energy re-attacks, so
-     repeated notes of the same pitch are found) split the stem into notes. Octave errors are fixed
+   * *No tab*: CREPE pitch tracking (GPU) and onset detection split the stem into notes. Attacks
+     come from three detectors: spectral change, level jumps, and the 1–3 kHz click of the finger on
+     the string, which finds repeated notes of the same pitch. Each note's semitone is checked
+     against its harmonics, because CREPE can read real low notes up to half a semitone off. Octave errors are fixed
      using the bass register and the spectrum (a real low note has energy at its fundamental and fifth).
      Fragments are merged, very short/unsure notes dropped, then everything is snapped to the beat
      map's grid. Notes that start without a new attack (legato) on the same string become hammer-ons /
      pull-offs, or slides for bigger jumps. With synthetic test songs CREPE found 100% of the notes
      (pYIN, the fallback, ~88%). If you give `--tuning`, its range is used for the octave checks.
 4. **Fingering**: a dynamic-programming optimiser picks string and fret for every note. It minimises
-   hand position shifts (more strongly for fast passages), prefers low positions and open strings,
-   and respects the tuning and string count. With a tab, the tab's fingering is kept.
+   hand position shifts (more strongly for fast passages), avoids skipping strings, slightly prefers
+   low positions and open strings, and respects the tuning and string count. Its weights were
+   tuned on a real tab (86% of notes on the same string/fret as the human tabber). With a tab, the
+   tab's fingering is kept.
 5. **Rocksmith files**: arrangement XML with beats synced to the audio, notes, sustains,
-   techniques, tuning, hand anchors, phrases and sections. Sections come from the tab's markers, or
-   are detected from the song's structure and named verse/chorus/bridge… (best effort).
+   techniques, tuning, hand anchors, phrases and sections. Sections come from the tab's markers; if
+   the tab has none, from where the tab's bass pattern starts over or changes; without a tab, from
+   the song's structure. Names (verse/chorus/bridge…) are a best-effort guess from loudness and
+   repetition. A long intro without bass gets its own "intro" section, and breaks of 2+ bars become
+   "noguitar" sections, so the in-game song map shows where you play.
    Long sections are split into 8-bar phrases (Riff Repeater works per phrase).
    There is **one difficulty level**: every phrase has `maxDifficulty="0"`.
    The recording's tuning reference is measured (e.g. A=432 Hz or a slightly fast/slow tape) and

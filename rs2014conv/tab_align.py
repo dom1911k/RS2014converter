@@ -138,7 +138,7 @@ def _cost_matrix(T: np.ndarray, A: np.ndarray) -> np.ndarray:
     return 1.0 - sim
 
 
-def _dtw(C: np.ndarray, skip_audio: float = 0.35, double: float = 1.0) -> tuple[list[tuple[int, int]], float]:
+def _dtw(C: np.ndarray, skip_audio: float | np.ndarray = 0.35, double: float = 1.0) -> tuple[list[tuple[int, int]], float]:
     """Subsequence DTW: the tab must be matched completely, audio may start/end anywhere.
 
     Steps (tab, audio): (1,1) normal, (1,2)/(2,1) local tempo halving/doubling,
@@ -146,6 +146,7 @@ def _dtw(C: np.ndarray, skip_audio: float = 0.35, double: float = 1.0) -> tuple[
     """
     T, A = C.shape
     INF = 1e18
+    skips = np.broadcast_to(np.asarray(skip_audio, float), (T,))
     D = np.full((T, A), INF)
     P = np.zeros((T, A), np.int8)  # 0 diag, 1 (1,2), 2 (2,1), 3 skip audio
     D[0] = C[0]
@@ -162,7 +163,7 @@ def _dtw(C: np.ndarray, skip_audio: float = 0.35, double: float = 1.0) -> tuple[
         best = stack.argmin(0)
         row = stack[best, ar] + C[i]
         # Horizontal steps: row[j] = min_k<=j row[k] + skip * (j - k)  (vectorised)
-        run = np.minimum.accumulate(row - skip_audio * ar) + skip_audio * ar
+        run = np.minimum.accumulate(row - skips[i] * ar) + skips[i] * ar
         improved = run < row - 1e-12
         best[improved] = 3
         D[i] = np.minimum(row, run)
@@ -219,6 +220,13 @@ def align(lt: LinearTab, tuning: list[int], stem_path, bm: BeatMap, try_shifts: 
     b_last = int(np.ceil(float(_q_to_beat(lt, last_note_q))))
     b_last = min(max(b_last, b_first + 1), lt.total_beats)
 
+    # Recordings add or repeat whole bars: skipping audio beats is cheap only after the last beat
+    # of a tab bar (row = tab beat), expensive in the middle of a bar.
+    last_beat = np.zeros(lt.total_beats, bool)
+    for m, mb in zip(lt.measures, lt.measure_start_beat):
+        last_beat[mb + m.beats - 1] = True
+    skip_cost = np.where(last_beat[b_first:b_last], 0.35, 2.0)
+
     feats = StemFeatures(stem_path)
     T_full = _tab_features(lt, tuning, 0)
     T = T_full[b_first:b_last]
@@ -231,7 +239,7 @@ def align(lt: LinearTab, tuning: list[int], stem_path, bm: BeatMap, try_shifts: 
         C = _cost_matrix(T, A)
         if C.shape[1] < C.shape[0] // 2:
             continue
-        path, cost = _dtw(C)
+        path, cost = _dtw(C, skip_cost)
         info(f"  alignment with audio beat grid '{name}': cost {cost:.3f}")
         if best is None or cost < best[1] - 1e-9:
             best = (name, cost, path, grid, A, C)
@@ -255,7 +263,7 @@ def align(lt: LinearTab, tuning: list[int], stem_path, bm: BeatMap, try_shifts: 
                  f"tuning is adjusted by {shift:+d}. Use --tuning to override.")
             Ts = _tab_features(lt, tuning, shift)[b_first:b_last]
             C = _cost_matrix(Ts, A)
-            path, cost = _dtw(C)
+            path, cost = _dtw(C, skip_cost)
 
     # Map each tab beat (within the aligned range) to an audio time.
     t_of = {}
@@ -385,6 +393,43 @@ def snap_to_onsets(notes: list[Note], stem_path, tolerance: float = 0.04, minimu
         n.time = new
         moves.append(abs(d))
     return len(moves), (1000 * float(np.median(moves)) if moves else 0.0)
+
+
+def tab_block_starts(lt: LinearTab, times: np.ndarray, window: int = 16, min_gap: int = 4) -> list[float]:
+    """Section boundaries from the bass part itself (for tabs without section markers).
+
+    Each played bar gets a fingerprint (its notes and their positions). A new block starts
+    - where the bass comes back after a break,
+    - where the song's main pattern (the bar the bass part begins with) restarts after other bars,
+    - where material not heard in the previous `window` bars begins (once the main pattern has
+      been played at least twice, so the song's first pass isn't cut into pieces).
+    Returns the start times (audio seconds) of those bars.
+    """
+    prints: list[tuple] = []
+    for m in lt.measures:
+        prints.append(tuple(sorted((round(n.start - m.start, 2), n.string, n.fret) for n in m.notes if not n.tie)))
+    played = [i for i, p in enumerate(prints) if p]
+    if len(played) < 8:
+        return []
+    head = prints[played[0]]
+    starts: list[int] = []
+    head_runs = 0
+    for i in played:
+        prev = prints[i - 1] if i > 0 else ()
+        recent = set(prints[max(0, i - window):i])
+        if prints[i] == head and prev != head:
+            head_runs += 1
+        if not prev:
+            starts.append(i)  # after silence / the very first bass bar
+        elif prints[i] == head and prev != head:
+            starts.append(i)  # the main pattern starts over
+        elif head_runs >= 2 and prints[i] not in recent and prints[:i].count(prev) >= 2:
+            starts.append(i)  # new (or long-unheard) material after familiar material
+    out: list[int] = []
+    for i in starts:
+        if not out or i - out[-1] >= min_gap or not prints[i - 1]:
+            out.append(i)
+    return [float(times[lt.measure_start_beat[i]]) for i in out if times[lt.measure_start_beat[i]] >= 0]
 
 
 # --------------------------------------------------------------------------- tab -> chart

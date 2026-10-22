@@ -207,6 +207,7 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     tuning_note = ""
     flagged: list[tuple[float, float, str]] = []
     marker_sections: list[Section] = []
+    tab_blocks: list[float] = []
     if inp.tab:
         from . import tab_align, tabs
 
@@ -233,6 +234,7 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         beat_list, notes, marker_sections, tsigs = tab_align.build_chart_parts(
             lt, al, bm, song_length, tun, float(cfg["tab"]["min_sustain_beats"]))
         flagged = al.flagged
+        tab_blocks = [] if marker_sections else tab_align.tab_block_starts(lt, al.tab_beat_times)
         report.add(f"Tab alignment: grid '{al.grid_name}', match quality {1 - al.cost:.2f}")
         if 1 - al.cost < 0.5:
             report.check(f"The tab matches the recording poorly overall (quality {1 - al.cost:.2f}). "
@@ -341,7 +343,8 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
             audio_io.save_wav(tmp, mix, SR)
             secs = sections.auto_detect(tmp, beats_mod.BeatMap(np.array([b.time for b in chart.beats]),
                                                                  np.array([b.measure >= 0 for b in chart.beats])),
-                                        chart.notes, int(cfg["sections"]["min_bars"]))
+                                        chart.notes, int(cfg["sections"]["min_bars"]),
+                                        boundaries=[t + pad for t in tab_blocks] or None)
         except Exception as e:  # noqa: BLE001
             warn(f"Section detection failed ({e}); using generic sections.")
             secs = []

@@ -53,7 +53,7 @@ tab:
 
 sections:
   auto_detect: true       # without tab markers: find verse/chorus/... from the audio
-  min_bars: 4
+  min_bars: 8             # shortest auto-detected section (bars)
   phrase_bars: 8          # long sections are split into phrases of this many bars (Riff Repeater)
 
 check_mix:

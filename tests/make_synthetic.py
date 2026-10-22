@@ -48,7 +48,10 @@ def bass_tone(f0: float, dur: float, seed: int, fundamental: float = 0.55) -> np
     # Like a real finger pluck: the low end swells in over ~12 ms, and the string/finger makes a
     # short bright click right at the attack.
     env = np.minimum(1, t / 0.012) * np.clip((dur + 0.08 - t) / 0.08, 0, 1)
-    click = np.diff(np.concatenate([[0], rng.standard_normal(n)])) * np.exp(-t / 0.003) * 0.35
+    from scipy.signal import butter, sosfilt
+
+    band = sosfilt(butter(2, [900, 3200], btype="band", fs=SR, output="sos"), rng.standard_normal(n))
+    click = band * np.exp(-t / 0.003) * 0.5  # finger-on-string click, mostly 1-3 kHz
     return ((y * env + click) * 0.25).astype(np.float32)
 
 

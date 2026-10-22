@@ -192,3 +192,58 @@ def test_japanese_titles(tmp_path):
     exports.write_midi(tmp_path / "a.mid", chart, "自由のショート")  # used to crash (latin-1)
     exports.write_gp5(tmp_path / "a.gp5", chart, "自由のショート", "haku.", "", [0] * 6)
     assert (tmp_path / "a.mid").exists() and (tmp_path / "a.gp5").exists()
+
+
+def test_intro_and_breaks_become_sections():
+    beats = [Beat(0.5 + 0.5 * i, (i // 4 + 1) if i % 4 == 0 else -1) for i in range(200)]
+    notes = [Note(16.5 + 0.5 * k, 0, 40, string=2, fret=2) for k in range(64)] + \
+            [Note(52.5 + 0.5 * k, 0, 40, string=2, fret=2) for k in range(56)]
+    out = sections.finalize([Section("intro", 0.5), Section("verse", 16.5), Section("bridge", 50.5),
+                             Section("chorus", 60.5)], beats, notes)
+    assert [(s.name, s.time) for s in out] == [("intro", 2.5), ("verse", 16.5), ("noguitar", 48.5),
+                                               ("bridge", 52.5), ("chorus", 60.5), ("noguitar", 80.5)]
+    plain = sections.finalize([], beats, notes)
+    assert [s.name for s in plain] == ["intro", "noguitar", "riff", "noguitar"]
+
+
+def test_semitone_check_fixes_a_flat_reading():
+    from rs2014conv.transcribe import SR, verify_semitones
+
+    t = np.arange(int(0.5 * SR)) / SR
+    f = 65.41  # C2
+    y = sum(np.sin(2 * np.pi * f * h * t) / h for h in range(1, 6)).astype(np.float32)
+    notes = [Note(0.0, 0.5, 35)]  # read as B1, like CREPE did on a real song
+    assert verify_semitones(notes, y) == 1 and notes[0].pitch == 36
+
+
+def test_tab_blocks_follow_the_bass_pattern():
+    from rs2014conv.tab_align import tab_block_starts
+
+    def bar(fret):
+        return [TabNote(k * 0.5, 0.5, 0, fret) for k in range(8)]
+
+    pattern = [3, 3, 5, 5, 7, 7, 8, 8]  # an 8-bar cycle, as in many songs
+    frets = [None] * 2 + pattern + pattern + [None, None] + pattern + [10, 12, 10, 12] + pattern
+    ms = []
+    for i, f in enumerate(frets):
+        m = _measure(4.0 * i, [] if f is None else bar(f))
+        for n in m.notes:
+            n.start += m.start
+        ms.append(m)
+    lt = unroll(TabSong("t", "a", 120, "Bass", [28, 33, 38, 43], ms))
+    starts = tab_block_starts(lt, np.arange(lt.total_beats + 1, dtype=float))
+    bars = [int(t // 4) + 1 for t in starts]
+    assert bars == [3, 11, 21, 29, 33]
+
+
+def test_dtw_skips_whole_bars():
+    from rs2014conv.tab_align import _dtw
+
+    rng = np.random.default_rng(0)
+    tab = rng.random((16, 6))  # 4 bars of 4 beats
+    audio = np.vstack([tab[:8], rng.random((4, 6)), tab[8:]])  # recording has an extra bar after bar 2
+    C = 1 - (tab / np.linalg.norm(tab, axis=1, keepdims=True)) @ (audio / np.linalg.norm(audio, axis=1, keepdims=True)).T
+    skip = np.where(np.arange(16) % 4 == 3, 0.35, 2.0)
+    path, _ = _dtw(C, skip)
+    mapping = {i: j for i, j in path}
+    assert mapping[7] == 7 and mapping[8] == 12  # the skip happens exactly at the bar line
