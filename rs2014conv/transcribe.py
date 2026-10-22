@@ -96,26 +96,32 @@ def hz_to_midi(f: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------- spectrum helper
 
 class BassSpectrum:
-    """Magnitude CQT of the stem in the bass register, for octave checks."""
+    """Short-time spectrum of the stem for octave checks.
+
+    A 128 ms STFT window: long enough to separate a note from its octave (we compare f and f/2,
+    not neighbouring semitones), short enough that neighbouring notes don't leak in. (A CQT is
+    no good here: its low-frequency windows are over a second long.)
+    """
 
     def __init__(self, y: np.ndarray):
         import librosa
 
-        self.fmin_midi = 21  # A0
-        self.bins_per_semitone = 3
         self.hop = 256
-        C = librosa.cqt(y, sr=SR, hop_length=self.hop, fmin=librosa.midi_to_hz(self.fmin_midi),
-                        n_bins=self.bins_per_semitone * 60, bins_per_octave=12 * self.bins_per_semitone)
-        self.mag = np.abs(C)
+        self.n_fft = 2048
+        self.mag = np.abs(librosa.stft(y, n_fft=self.n_fft, hop_length=self.hop))
+        self.freqs = librosa.fft_frequencies(sr=SR, n_fft=self.n_fft)
 
     def energy(self, midi: int, t0: float, t1: float) -> float:
-        b = (midi - self.fmin_midi) * self.bins_per_semitone
-        if b < 0 or b >= self.mag.shape[0]:
-            return 0.0
+        f = 440.0 * 2 ** ((midi - 69) / 12)
+        band = (self.freqs >= f * 0.94) & (self.freqs <= f * 1.06)
+        if not band.any():
+            band = np.zeros_like(band)
+            band[int(np.argmin(np.abs(self.freqs - f)))] = True
         f0 = int(t0 * SR / self.hop)
         f1 = max(f0 + 1, int(t1 * SR / self.hop))
-        lo, hi = max(0, b - 1), min(self.mag.shape[0], b + 2)
-        return float(self.mag[lo:hi, f0:f1].max(0).mean()) if f1 <= self.mag.shape[1] else 0.0
+        if f1 > self.mag.shape[1]:
+            return 0.0
+        return float(self.mag[band, f0:f1].max(0).mean())
 
 
 # --------------------------------------------------------------------------- segmentation
@@ -297,7 +303,7 @@ def merge_fragments(notes: list[Note], gap: float, onset_times: np.ndarray) -> l
         if out:
             p = out[-1]
             g = n.time - p.end
-            has_attack = np.any(np.abs(onset_times - n.time) < 0.02)
+            has_attack = np.any(np.abs(onset_times - n.time) < 0.035)
             if p.pitch == n.pitch and g < gap and not has_attack:
                 p.sustain = n.end - p.time
                 p.confidence = max(p.confidence, n.confidence)

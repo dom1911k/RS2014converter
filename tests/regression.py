@@ -25,6 +25,7 @@ SONGS = {
     "shift": ["--tuning-shift", "-1"],
     "extra": ["--form", "AABBBCDAA", "--lead", "0.15"],
     "human": ["--humanize", "0.025", "--cents", "-30", "--legato"],
+    "jump": ["--tempo-jump", "0.25", "--form", "AABBCDAAAABBCDAA", "--tab-times", "2"],
 }
 
 SCENARIOS = [  # name, song, use tab, use given stem
@@ -36,6 +37,8 @@ SCENARIOS = [  # name, song, use tab, use given stem
     ("tab + stem, humanized, A=432", "human", True, True),
     ("no tab + stem, humanized, legato, A=432", "human", False, True),
     ("no tab, demucs", "base", False, False),
+    ("no tab + stem, sudden tempo change", "jump", False, True),
+    ("tab + stem, sudden tempo change", "jump", True, True),
 ]
 
 
@@ -68,6 +71,7 @@ def main() -> int:
             continue
         print(f"{title:45s} recall {r['recall']:.2f}  precision {r['precision']:.2f}  pitch {r['pitch_accuracy']:.2f}  "
               f"onset {r['mean_onset_error_ms']:.0f} ms  beats {r['beats_within_30ms']:.2f}  "
+              f"downbeats {r['downbeats_ok']:.2f}  "
               f"legato {r['legato_marked']}  cents {r['cent_offset']:+.0f}")
     (work / "regression.json").write_text(json.dumps(rows, indent=1))
     return 0

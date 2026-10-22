@@ -93,23 +93,124 @@ def _track_beat_this(mix_path: Path, device: str, checkpoint: str = "final0") ->
     return np.asarray(beats, float), np.asarray(downbeats, float)
 
 
-def _track_librosa(mix_path: Path, beats_per_bar: int = 4) -> tuple[np.ndarray, np.ndarray]:
+def _track_librosa(mix_path: Path, stem_path: Path | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Fallback tracker: dynamic-programming beat tracking that follows a local tempo curve, and
+    downbeats chosen where chords / bass notes change and the kick and bass hit."""
     import librosa
+    from scipy.ndimage import median_filter
 
     info("Tracking beats with librosa (fallback tracker)...")
-    sr = 22050
+    sr, hop = 22050, 256
     y = audio_io.load(mix_path, sr=sr, mono=True)[0]
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=256, aggregate=np.median)
-    _, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, hop_length=256,
-                                             tightness=60, trim=False)
-    beats = librosa.frames_to_time(beat_frames, sr=sr, hop_length=256)
-    # Downbeats: pick the bar phase where low-frequency onsets (kick/bass) are strongest.
-    S = np.abs(librosa.stft(y, n_fft=2048, hop_length=256))
-    low = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S[:40]), sr=sr, hop_length=256)
-    vals = low[np.clip(beat_frames, 0, len(low) - 1)]
-    scores = [vals[p::beats_per_bar].mean() if len(vals[p::beats_per_bar]) else 0 for p in range(beats_per_bar)]
-    phase = int(np.argmax(scores))
-    return beats, beats[phase::beats_per_bar]
+    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop, aggregate=np.median)
+    glob = float(librosa.feature.tempo(onset_envelope=env, sr=sr, hop_length=hop)[0])
+    local = librosa.feature.tempo(onset_envelope=env, sr=sr, hop_length=hop, aggregate=None,
+                                  ac_size=6.0, std_bpm=2.0, start_bpm=glob)
+    # Local estimates jump between tempo octaves (x1/2, x2); a real tempo change is much smaller.
+    local = _smooth_tempo_octaves(local)
+    local = median_filter(local, size=int(4.0 * sr / hop), mode="nearest")
+    _, frames = librosa.beat.beat_track(onset_envelope=env, sr=sr, hop_length=hop, bpm=local,
+                                        tightness=100, trim=False)
+    beats = librosa.frames_to_time(frames, sr=sr, hop_length=hop)
+    if len(beats) < 8:
+        return beats, beats[::4]
+    return beats, _downbeats_from_features(beats, y, sr, stem_path)
+
+
+def _smooth_tempo_octaves(local: np.ndarray, jump_cost: float = 4.0, prior_cost: float = 0.3) -> np.ndarray:
+    """Per frame choose tempo x0.5 / x1 / x2 so the curve is continuous (Viterbi), with a mild
+    preference for 70-180 BPM."""
+    factors = np.array([0.5, 1.0, 2.0])
+    cand = np.log2(np.maximum(local, 1.0)[:, None] * factors[None])  # (n, 3)
+    prior = prior_cost * np.maximum(0, np.abs(cand - np.log2(115.0)) - 0.65)
+    n = len(local)
+    cost = prior[0].copy()
+    back = np.zeros((n, 3), int)
+    for k in range(1, n):
+        trans = cost[None, :] + jump_cost * np.abs(cand[k][:, None] - cand[k - 1][None, :])
+        back[k] = trans.argmin(1)
+        cost = trans.min(1) + prior[k]
+    j = int(cost.argmin())
+    out = np.empty(n)
+    for k in range(n - 1, -1, -1):
+        out[k] = 2 ** cand[k, j]
+        j = back[k, j]
+    return out
+
+
+def _downbeats_from_features(beats: np.ndarray, y: np.ndarray, sr: int, stem_path: Path | None) -> np.ndarray:
+    """Pick the bar positions (meter 3 or 4, phase may shift at odd bars) with a Viterbi pass over
+    per-beat evidence: harmonic change in the mix, bass-note change and attacks, low-end hits."""
+    import librosa
+
+    hop = 512  # 23 ms is plenty for per-beat evidence, and 2x faster than the beat tracker's hop
+    frames = librosa.time_to_frames(beats, sr=sr, hop_length=hop)
+    S = np.abs(librosa.stft(y, n_fft=2048, hop_length=hop))
+    harmonic, _ = librosa.decompose.hpss(S, kernel_size=17, margin=2.0)  # chords without the drums
+    chroma = librosa.feature.chroma_stft(S=harmonic ** 2, sr=sr, hop_length=hop)
+    low_on = librosa.onset.onset_strength(S=librosa.amplitude_to_db(S[:24]), sr=sr, hop_length=hop)
+
+    def change(feat: np.ndarray) -> np.ndarray:
+        sync = librosa.util.sync(feat, frames, aggregate=np.median)  # column k: beat k-1 .. k
+        sync = sync / (np.linalg.norm(sync, axis=0, keepdims=True) + 1e-9)
+        out = np.zeros(len(beats))
+        for k in range(len(beats)):
+            a, b = sync[:, k], sync[:, min(k + 1, sync.shape[1] - 1)]
+            out[k] = 1 - float(a @ b)  # change from the beat before to the beat starting here
+        return out
+
+    def at_beats(curve: np.ndarray) -> np.ndarray:
+        return np.array([curve[max(0, f - 2):f + 3].max() if f < len(curve) else 0.0 for f in frames])
+
+    feats = [change(chroma), at_beats(low_on)]
+    if stem_path is not None:
+        ys = audio_io.load(stem_path, sr=sr, mono=True)[0]
+        C = np.abs(librosa.cqt(ys, sr=sr, hop_length=hop, fmin=librosa.midi_to_hz(24), n_bins=48))
+        feats.append(change(C))
+        feats.append(at_beats(librosa.onset.onset_strength(y=ys, sr=sr, hop_length=hop)))
+    z = sum((f - f.mean()) / (f.std() + 1e-9) for f in feats) / len(feats)
+
+    best = None
+    for meter in (4, 3):
+        score, path = _bar_viterbi(z, meter)
+        # Normalise: average evidence per downbeat (more downbeats in 3/4 must not win by count)
+        per_bar = score / max(1, sum(1 for s_ in path if s_ == 0))
+        if meter == 3:
+            per_bar *= 0.85  # 4/4 is far more common; 3/4 must be clearly better
+        if best is None or per_bar > best[0]:
+            best = (per_bar, meter, path)
+    _, meter, path = best
+    if meter == 3:
+        info("Meter guess: 3/4")
+    return beats[np.array(path) == 0]
+
+
+def _bar_viterbi(z: np.ndarray, meter: int, short_bar_penalty: float = 2.5) -> tuple[float, list[int]]:
+    """States = position of each beat in its bar (0 = downbeat). A bar may end early (odd bar,
+    pickup) at a penalty; it never runs longer than the meter."""
+    n = len(z)
+    NEG = -1e18
+    score = np.full((n, meter), NEG)
+    back = np.zeros((n, meter), int)
+    score[0] = [z[0] if p == 0 else 0.0 for p in range(meter)]
+    for k in range(1, n):
+        for p in range(meter):
+            if p == 0:
+                cands = [(score[k - 1, meter - 1], meter - 1)] + \
+                        [(score[k - 1, q] - short_bar_penalty, q) for q in range(meter - 1)]
+                v, q = max(cands)
+                score[k, 0] = v + z[k]
+                back[k, 0] = q
+            else:
+                score[k, p] = score[k - 1, p - 1]
+                back[k, p] = p - 1
+    p = int(np.argmax(score[-1]))
+    total = float(score[-1, p])
+    path = [p]
+    for k in range(n - 1, 0, -1):
+        p = int(back[k, p])
+        path.append(p)
+    return total, path[::-1]
 
 
 def _refine(beats: np.ndarray, mix_path: Path) -> np.ndarray:
@@ -237,9 +338,9 @@ def _extend(beats: np.ndarray, db: np.ndarray, song_length: float) -> tuple[np.n
 
 
 def detect(mix_path: Path, cache_dir: Path, tracker: str = "beat_this", device: str = "auto",
-           song_length: float | None = None, checkpoint: str = "final0") -> BeatMap:
+           song_length: float | None = None, checkpoint: str = "final0", stem_path: Path | None = None) -> BeatMap:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    key = audio_io.file_hash(mix_path, f"beats:{tracker}:{checkpoint}:v3")
+    key = audio_io.file_hash(mix_path, f"beats:{tracker}:{checkpoint}:v4")
     cache = cache_dir / f"beats_{key}.json"
     if cache.exists():
         info(f"Beat map: using cached result ({cache.name})")
@@ -252,12 +353,17 @@ def detect(mix_path: Path, cache_dir: Path, tracker: str = "beat_this", device: 
         try:
             beats, downbeats = _track_beat_this(mix_path, device, checkpoint)
         except Exception as e:  # noqa: BLE001 - any failure falls back
-            warn(f"Beat This! failed ({e.__class__.__name__}: {e}); using the librosa tracker instead. "
-                 "Check the beat map in the check mix.")
-            beats, downbeats = _track_librosa(mix_path)
+            if "Could not load the checkpoint" in str(e):
+                reason = ("its model isn't downloaded yet and the download server (cloud.cp.jku.at) "
+                          "couldn't be reached - run setup.bat again later")
+            else:
+                reason = f"{e.__class__.__name__}: {e}"
+            warn(f"Beat This! not used ({reason}). Using the simpler librosa tracker instead; "
+                 "check the clicks in the check mix.")
+            beats, downbeats = _track_librosa(mix_path, stem_path)
             source = "librosa"
     else:
-        beats, downbeats = _track_librosa(mix_path)
+        beats, downbeats = _track_librosa(mix_path, stem_path)
 
     beats, db = _clean(beats, downbeats)
     beats = _refine(beats, mix_path)

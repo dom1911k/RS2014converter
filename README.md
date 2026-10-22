@@ -157,8 +157,10 @@ output\Band - Song Title\
 
 ### Checking the chart (do this before playing)
 
-1. **Read `report.txt`.** It says which tuning was used (and whether it was guessed), the tempo,
-   where the chart starts, and, for tabs, **which measures look misaligned**, with times.
+1. **Read `report.txt`.** Its first lines, under **PLEASE CHECK**, list everything that needs
+   your ears: a guessed tuning, measures where tab and recording disagree (with times), the fallback beat
+   tracker, chart-check issues, packaging problems. Below that are the details: tuning, tempo, where
+   the chart starts, sections.
 2. **Listen to `review\check_mix.wav`.** You hear the song with a simple synth playing exactly what
    Rocksmith will show, plus a click on every beat (higher click = first beat of a bar).
    If the synth and the real bass agree, the chart is right. Listen especially at the times
@@ -200,7 +202,10 @@ put `version: "2"` in `song.yaml`.
    bass sub-model runs, so it's 4× faster than the full model. Cached in the `cache` folder.
 2. **Beat map**: *Beat This!* (CPJKU, 2024, state of the art) finds beats and downbeats in the full mix. Every beat keeps its
    own time, so tempo drift, ritardandos etc. are followed exactly. A constant tracker latency is
-   corrected against the mix's onsets, and bars where the tracker missed a downbeat are split. The lead-in is detected (first sound, first beat); if the bass
+   corrected against the mix's onsets, and bars where the tracker missed a downbeat are split.
+   If the Beat This! model isn't available, a fallback tracker is used. It follows a local tempo curve
+   (sudden tempo changes included) and finds bar starts where chords and bass notes change and the
+   kick and bass hit, for 4/4 or 3/4. The lead-in is detected (first sound, first beat); if the bass
    starts too early for a count-in, silence is added in front of the audio, and every time is shifted to match.
 3. **Notes**
    * *Tab*: Guitar Pro 3–8 is read (GP6/7/8 by a built-in reader). Repeats, alternate endings and
@@ -270,7 +275,7 @@ unticked in its configuration. A **Release** build from DLC Builder adds DD.
 |---|---|
 | `Setup has not been run yet` | double-click `setup.bat` |
 | `Could not find Wwise ... installation` | install Wwise **2023** (section 1a) and start it once. If it's installed somewhere unusual, set `packaging: wwise_console:` in `config.yaml` to the full path of `WwiseConsole.exe` (in `Authoring\x64\Release\bin`) |
-| `Beat This! failed ... using the librosa tracker` | the beat model wasn't downloaded. Run `setup.bat` again while online. The simple tracker works but is less accurate on hard songs |
+| `Beat This! not used ...` | the beat model isn't downloaded yet. Its download server is run by the model's authors and is sometimes down for maintenance (status: <https://github.com/CPJKU/beat_this/issues>). Run `setup.bat` again later. Until then the fallback tracker is used: fine on steady songs, but listen to the clicks in the check mix |
 | `RsPackager is not built` | run `setup.bat` again and look for errors in step 5 |
 | `The chosen tab track has no notes` | use `--track N` |
 | report says *tab and audio don't match well* | is it the same version of the song (live/studio, a radio edit)? Listen to the check mix there |

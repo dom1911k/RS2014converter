@@ -8,6 +8,15 @@ from __future__ import annotations
 import sys
 
 
+def _hub_dir() -> str:
+    try:
+        import torch
+
+        return str(__import__("pathlib").Path(torch.hub.get_dir()) / "checkpoints")
+    except Exception:  # noqa: BLE001
+        return "%USERPROFILE%\\.cache\\torch\\hub\\checkpoints"
+
+
 def main() -> int:
     ok = True
     print("1/3 Demucs htdemucs_ft (bass separation)...")
@@ -27,7 +36,12 @@ def main() -> int:
         print("    OK")
     except Exception as e:  # noqa: BLE001
         ok = False
-        print(f"    FAILED: {e}\n    (make_cdlc will fall back to the simpler librosa beat tracker)")
+        print(f"    FAILED: {e}")
+        print("    The model's download server (cloud.cp.jku.at, run by the Beat This! authors) was not")
+        print("    reachable. It is sometimes down for maintenance - run setup.bat again later; see")
+        print("    https://github.com/CPJKU/beat_this/issues for its status. Until then make_cdlc uses")
+        print("    the simpler librosa beat tracker. If you get the file 'beat_this-final0.ckpt' another")
+        print("    way, put it in:  " + _hub_dir())
     print("3/3 CREPE pitch model...")
     try:
         import torch

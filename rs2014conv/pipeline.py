@@ -43,9 +43,19 @@ class SongInputs:
 @dataclass
 class Report:
     lines: list[str] = field(default_factory=list)
+    attention: list[str] = field(default_factory=list)  # shown first: what to check by ear
 
     def add(self, text: str = "") -> None:
         self.lines.append(text)
+
+    def check(self, text: str) -> None:
+        self.attention.append(text)
+
+    def text(self) -> str:
+        head, rest = self.lines[:5], self.lines[5:]
+        box = ["PLEASE CHECK:"] + [f"  * {a}" for a in self.attention] if self.attention else \
+              ["Nothing special to check - still listen to review\\check_mix.wav once."]
+        return "\n".join(head + box + [""] + rest) + "\n"
 
 
 def _fmt(t: float) -> str:
@@ -186,7 +196,10 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
 
     step("Beat map")
     bm = beats_mod.detect(inp.audio, cache, cfg["beats"]["tracker"], device, song_length,
-                          cfg["beats"].get("checkpoint", "final0"))
+                          cfg["beats"].get("checkpoint", "final0"), stem_path)
+    if bm.source != cfg["beats"]["tracker"]:
+        report.check("The Beat This! model wasn't available, so the simpler beat tracker was used. Listen to the "
+                     "clicks in review\\check_mix.wav (high click = bar start). Run setup.bat again later to get it.")
     report.add(f"Beat tracker: {bm.source}; median tempo {bm.average_tempo():.1f} BPM "
                f"(range {np.percentile(bm.tempo_curve(), 5):.1f}-{np.percentile(bm.tempo_curve(), 95):.1f})")
 
@@ -215,10 +228,18 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         if al.pitch_shift:
             tun = [p + al.pitch_shift for p in tun]
             tuning_note = f"{tuning.describe(tun)} (tab tuning shifted {al.pitch_shift:+d} to match the recording)"
+            report.check(f"The recording is {abs(al.pitch_shift)} semitone(s) {'lower' if al.pitch_shift < 0 else 'higher'} "
+                         f"than the tab, so the tuning was changed to {tuning.describe(tun)} (same frets as the tab).")
         beat_list, notes, marker_sections, tsigs = tab_align.build_chart_parts(
             lt, al, bm, song_length, tun, float(cfg["tab"]["min_sustain_beats"]))
         flagged = al.flagged
         report.add(f"Tab alignment: grid '{al.grid_name}', match quality {1 - al.cost:.2f}")
+        if 1 - al.cost < 0.5:
+            report.check(f"The tab matches the recording poorly overall (quality {1 - al.cost:.2f}). "
+                         "Is it the same version of the song, and the right track (--track)?")
+        if al.flagged:
+            report.check(f"{len(al.flagged)} measure(s) where tab and recording disagree - see the list below "
+                         "and listen there.")
         if cfg["tab"].get("snap_to_onsets", False):
             moved, med_ms = tab_align.snap_to_onsets(notes, stem_path, float(cfg["tab"].get("snap_tolerance", 0.04)))
             info(f"{moved} tab note(s) nudged onto the attacks in the recording (median {med_ms:.0f} ms)")
@@ -244,6 +265,7 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         else:
             tun, tname, why = tuning.guess_tuning([n.pitch for n in notes], inp.strings)
             tuning_note = f"{tname} (GUESSED: {why}) - pass --tuning if this is wrong"
+            report.check(f"The tuning was guessed: {tname} ({why}). Give --tuning if it's wrong.")
             info(f"Tuning guess: {tname} ({why})")
         beat_list, tsigs = beats_from_map(bm)
         report.add(f"Transcription: {stats}")
@@ -258,6 +280,7 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     moved_oct = sum(1 for n in notes if getattr(n, "_octave_moved", False))
     if moved_oct:
         warn(f"{moved_oct} note(s) were out of range for the tuning and were moved by an octave.")
+        report.check(f"{moved_oct} note(s) didn't fit the tuning and were moved an octave (wrong tuning?).")
     if not inp.tab:
         from .transcribe import apply_legato
 
@@ -426,8 +449,10 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         report.add(f"  EOF project: {eof_path}")
     report.add(f"  Rocksmith XML (open in EOF via File > Import > Rocksmith): {xml_path}")
     report.add(f"  DLC Builder project: {rs2dlc}")
-    (out_dir / "report.txt").write_text("\n".join(report.lines) + "\n", encoding="utf-8")
+    (out_dir / "report.txt").write_text(report.text(), encoding="utf-8")
     step("Done")
+    if report.attention:
+        print("PLEASE CHECK:\n" + "\n".join(f"  * {a}" for a in report.attention) + "\n")
     print("\n".join(report.lines[-7:]))
     return out_dir
 
@@ -462,6 +487,7 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
              "or open the .rs2dlc project in DLC Builder.")
         report.add("")
         report.add("Packaging: NOT DONE (RsPackager not found).")
+        report.check("No .psarc was built: the packager isn't set up (run setup.bat).")
         return None
     pc = cfg["packaging"]
     args = cmd + ["build", str(rs2dlc), "--out", str(out_dir)]
@@ -489,6 +515,7 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
         err = (proc.stderr or "").strip().splitlines()
         warn("Packaging failed: " + (err[-1] if err else f"exit code {proc.returncode}"))
         report.add("Packaging: FAILED - " + (" ".join(err[-3:]) if err else ""))
+        report.check("Building the .psarc failed - see 'Packaging' below.")
         if "Wwise" in (proc.stderr or ""):
             report.add("  -> Install Wwise 2023 (see README, 'Wwise') or set packaging.wwise_console in config.yaml.")
         return None
@@ -496,6 +523,7 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
     for v in verify:
         report.add(f"  verify: {v}")
     if issues:
+        report.check(f"DLC Builder's chart checks found {len(issues)} issue(s) - see 'Packaging' below.")
         report.add("  DLC Builder arrangement checks:")
         for i in issues:
             report.add(f"    {i}")

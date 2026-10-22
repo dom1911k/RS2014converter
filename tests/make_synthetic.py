@@ -28,8 +28,11 @@ FORM = ["A", "A", "B", "B", "C", "D", "A", "A"]  # verse x2, B x2, C, D, verse x
 RIFFS = {"A": RIFF_A, "B": RIFF_B, "C": RIFF_C, "D": RIFF_D}
 
 
-def tempo_beat_times(n_beats: int, start: float, bpm0: float, bpm1: float) -> np.ndarray:
+def tempo_beat_times(n_beats: int, start: float, bpm0: float, bpm1: float, jump: float = 0.0) -> np.ndarray:
     bpm = np.linspace(bpm0, bpm1, n_beats)
+    if jump:  # sudden tempo change in the middle (on a bar line)
+        half = (n_beats // 8) * 4
+        bpm[half:] *= 1 + jump
     ibi = 60.0 / bpm
     return start + np.concatenate([[0], np.cumsum(ibi[:-1])])
 
@@ -88,6 +91,8 @@ def main():
     ap.add_argument("--humanize", type=float, default=0.0, help="random timing error of the bassist (s, max)")
     ap.add_argument("--cents", type=float, default=0.0, help="tuning reference offset of the recording")
     ap.add_argument("--legato", action="store_true", help="play riff C's last notes as pull-offs (no attack)")
+    ap.add_argument("--tab-times", type=int, default=1, help="the tab's written form is played this many times")
+    ap.add_argument("--tempo-jump", type=float, default=0.0, help="e.g. 0.25 = 25%% faster from the middle on")
     ap.add_argument("--fundamental", type=float, default=0.55, help="level of the fundamental vs 2nd harmonic")
     a = ap.parse_args()
     out = Path(a.out)
@@ -96,7 +101,7 @@ def main():
     form = list(a.form)
     bars = len(form) + 2  # + 1 bar drums-only intro + 1 bar ending
     n_beats = bars * 4 + 1
-    bt = tempo_beat_times(n_beats, a.lead, 112, 124)  # drifting tempo
+    bt = tempo_beat_times(n_beats, a.lead, 112, 124, a.tempo_jump)  # drifting tempo
     length = bt[-1] + 2.0
     mix = np.zeros(int(length * SR), np.float32)
     bass = np.zeros_like(mix)
@@ -145,15 +150,17 @@ def main():
     # Drums for all bars, chords pad (simple triads) in the bass-line bars
     for b in range(bars * 4):
         t = bt[b]
-        add(mix, t, drum_hit("kick" if b % 2 == 0 else "snare", b))
+        hit = drum_hit("kick" if b % 2 == 0 else "snare", b)
+        add(mix, t, hit * (1.0 if b % 4 == 0 else 0.7) if b % 2 == 0 else hit)
         add(mix, t, drum_hit("hat", 1000 + b))
         add(mix, (bt[b] + bt[b + 1]) / 2, drum_hit("hat", 2000 + b))
     for bar_i, sec in enumerate(form):
-        root = {"A": 52, "B": 57, "C": 62, "D": 52}[sec] + a.tuning_shift + a.cents / 100
+        # Chords change every bar (like most songs): a I-IV-V-vi-ish cycle on the section's root.
+        root = {"A": 52, "B": 57, "C": 62, "D": 52}[sec] + [0, 5, 7, 3][bar_i % 4] + a.tuning_shift + a.cents / 100
         t0, t1 = time_of((bar_i + 1) * 4), time_of((bar_i + 2) * 4)
         n = int((t1 - t0) * SR)
         tt = np.arange(n) / SR
-        pad = sum(np.sin(2 * np.pi * 440 * 2 ** ((root + iv + 12 - 69) / 12) * tt) for iv in (0, 4, 7)) * 0.04
+        pad = sum(np.sin(2 * np.pi * 440 * 2 ** (a.cents / 1200) * 2 ** ((root - a.cents / 100 + iv + 12 - 69) / 12) * tt) for iv in (0, 4, 7)) * 0.08
         add(mix, t0, (pad * np.minimum(1, tt / 0.05)).astype(np.float32))
     mix = mix + bass
     peak = np.abs(mix).max()
@@ -161,11 +168,11 @@ def main():
     sf.write(out / "mix.wav", np.stack([mix, mix], 1), SR)
     sf.write(out / "bass.wav", np.stack([bass, bass], 1), SR)
     (out / "truth.json").write_text(json.dumps({"notes": truth, "beats": bt.tolist()}, indent=1))
-    write_tab(out / "tab.gp5")
+    write_tab(out / "tab.gp5", a.tab_times)
     print(f"wrote {out}")
 
 
-def write_tab(path: Path) -> None:
+def write_tab(path: Path, times: int = 1) -> None:
     """GP5 with a count-in bar, the verse as a repeat, markers and a constant 120 BPM (not the real tempo)."""
     import guitarpro as gp
 
@@ -178,8 +185,9 @@ def write_tab(path: Path) -> None:
     bass.channel.instrument = 33
     song.tracks = [guitar, bass]
     # Written form: count-in, |: A :|, |: B :|, C, D, |: A :|
-    written = [(None, "", False, 0), ("A", "Verse", True, 1), ("B", "Chorus", True, 1), ("C", "Bridge", False, 0),
-               ("D", "Riff", False, 0), ("A", "Verse", True, 1)]
+    body = [("A", "Verse", True, 1), ("B", "Chorus", True, 1), ("C", "Bridge", False, 0),
+            ("D", "Riff", False, 0), ("A", "Verse", True, 1)]
+    written = [(None, "", False, 0)] + body * times
     start = gp.Duration.quarterTime
     for i, (riff, marker, rep, close) in enumerate(written):
         h = gp.MeasureHeader(number=i + 1, start=start)

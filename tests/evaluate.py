@@ -29,6 +29,7 @@ def load_chart(folder: Path):
     m = re.search(r"; ([0-9.]+) s of silence was added", report)
     pad = float(m.group(1)) if m else 0.0
     beats = [float(b.get("time")) - pad for b in root.iter("ebeat")]
+    load_chart.downbeats = [float(b.get("time")) - pad for b in root.iter("ebeat") if b.get("measure") is not None]
     load_chart.cent_offset = float(root.findtext("centOffset") or 0)
     return [(t - pad, p, s, f, lg) for t, p, s, f, lg in notes], beats
 
@@ -60,12 +61,18 @@ def evaluate(folder: Path, truth_path: Path, tol: float = 0.05) -> dict:
                 octave_err += 1
     tb = np.array(truth["beats"])
     beat_err = [np.min(np.abs(np.array(beats) - t)) for t in tb]
+    dbs = np.array(load_chart.downbeats)
+    # Truth downbeats: every 4th beat from the first (intro bar), up to the last bass bar.
+    last = max(n["end"] for n in tnotes)
+    tdb = [t for t in tb[::4] if t <= last + 0.1]
+    db_ok = float(np.mean([np.min(np.abs(dbs - t)) < 0.05 for t in tdb])) if len(dbs) else 0.0
     res = {
         "truth_notes": len(tnotes), "chart_notes": len(chart),
         "recall": hits / len(tnotes), "precision": hits / max(1, len(chart)),
         "pitch_accuracy": pitch_ok / max(1, hits), "octave_errors": octave_err,
         "mean_onset_error_ms": 1000 * float(np.mean(errs)) if errs else None,
         "beats_within_30ms": float(np.mean(np.array(beat_err) < 0.03)),
+        "downbeats_ok": db_ok,
         "legato_marked": f"{legato_ok}/{sum(1 for n in tnotes if n.get('legato'))}",
         "cent_offset": load_chart.cent_offset,
     }
