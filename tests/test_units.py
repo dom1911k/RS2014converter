@@ -247,3 +247,42 @@ def test_dtw_skips_whole_bars():
     path, _ = _dtw(C, skip)
     mapping = {i: j for i, j in path}
     assert mapping[7] == 7 and mapping[8] == 12  # the skip happens exactly at the bar line
+
+
+def test_bass_trainer_chart(tmp_path):
+    """A Bass Trainer chart (.btchart.json from the browser extension) reads like a tab."""
+    import json
+
+    from rs2014conv.tabs import is_btchart, read_tab
+
+    # Bar 1: 4/4 at 120 BPM (2 s), bar 2: 6/8 (dotted-quarter = 60 BPM -> 3 s).
+    bars = [{"i": 0, "t": 0.0, "end": 2.0, "measure": 0, "sig": [4, 4]},
+            {"i": 1, "t": 2.0, "end": 5.0, "measure": 1, "sig": [6, 8]}]
+    notes = [
+        {"t": 0.0, "dur": 0.25, "string": 0, "fret": 5, "flags": {"palmMute": True}},
+        {"t": 0.25, "dur": 0.25, "string": 0, "fret": 7, "flags": {"hopo": True}},          # hammer-on
+        {"t": 0.5, "dur": 0.5, "string": 1, "fret": 2, "flags": {"slide": {"type": "legato", "toFret": 4}}},
+        {"t": 1.0, "dur": 0.5, "string": 1, "fret": 4, "flags": {"slideTarget": True}},
+        {"t": 1.0 + 1 / 3, "dur": 0.1, "string": 2, "fret": 0, "flags": {"dead": True}},  # triplet position
+        {"t": 2.0, "dur": 1.0, "string": 3, "fret": 9, "flags": {"harmonic": True, "vibrato": True}},
+    ]
+    chart = {"format": "bass-chart", "version": 1, "meta": {"title": "Test", "artist": "Band", "track": "Bass"},
+             "instrument": {"strings": 4, "tuning": [26, 33, 38, 43]}, "duration": 5.0, "bars": bars,
+             "sections": [{"name": "Intro", "t": 0.0}, {"name": "Verse", "t": 2.0}], "notes": notes}
+    path = tmp_path / "Band - Test.btchart.json"
+    path.write_text(json.dumps(chart), encoding="utf-8")
+    assert is_btchart(path) and not is_btchart(tmp_path / "missing.json")
+
+    song = read_tab(path)
+    assert (song.title, song.artist, song.tuning) == ("Test", "Band", [26, 33, 38, 43])
+    m1, m2 = song.measures
+    assert (m1.start, m1.length, m1.marker, round(m1.tempo)) == (0.0, 4.0, "Intro", 120)
+    assert (m2.start, m2.numerator, m2.denominator, m2.marker) == (4.0, 6, 8, "Verse")
+    assert m2.beats == 2 and round(m2.tempo) == 60  # quarter BPM: 3 quarters in 3 s
+    n = m1.notes
+    assert [x.start for x in n] == [0.0, 0.5, 1.0, 2.0, 2 + 2 / 3]
+    assert n[0].palm_mute and n[0].hammer_to_next and not n[1].hammer_to_next
+    assert n[2].slide == "legato" and n[3].fret == 4
+    assert n[4].dead and m2.notes[0].harmonic and m2.notes[0].vibrato and m2.notes[0].duration == 1.0
+    lt = unroll(song)
+    assert len(lt.measures) == 2 and lt.total_beats == 6 and len(lt.notes) == 6

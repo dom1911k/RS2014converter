@@ -114,13 +114,29 @@ Even simpler: drag the song folder onto **`drop_song_folder_here.bat`** in Explo
 The results go to an `output` folder inside the song folder. To redo the song after changing
 something, run the same command again. Separation and beat tracking are cached, so reruns are fast.
 
+### Way 3: from a Songsterr bass tab (with the Bass Trainer extension)
+
+The [Bass Trainer](https://github.com/dom1911k/SngstrrXRcksmth) browser extension can export the
+bass tab you have open on Songsterr as a ready song folder:
+
+1. Open the song's bass tab on Songsterr. In the BASS TRAINER panel → **Song & highway**, click
+   **RS2014 CDLC kit**. A ZIP downloads with `song.yaml` (title, artist, tuning) and the tab as
+   `Artist - Title.btchart.json` (notes, rhythms, sections and techniques).
+2. Unzip it and put **the song's audio file** in the folder (one you own: CD rip, purchased
+   download…). Songsterr's tab follows its own recording, so the same recording lines up best;
+   another version of the song works too, the tab is aligned beat by beat.
+3. Drag the folder onto **`drop_song_folder_here.bat`**.
+
+`.btchart.json` files are picked up automatically in a song folder, like Guitar Pro files.
+A chart made from Songsterr's tab is for your own use: don't upload it.
+
 ### All options
 
 | Option | What it does |
 |---|---|
 | `--title`, `--artist` | required (or in `song.yaml`) |
 | `--album`, `--year` | optional, shown in the game |
-| `--tab FILE` | Guitar Pro `.gp3 .gp4 .gp5 .gpx .gp` (best), or a plain-text tab `.txt` (best effort) |
+| `--tab FILE` | Guitar Pro `.gp3 .gp4 .gp5 .gpx .gp` or a Bass Trainer chart `.btchart.json` (best), or a plain-text tab `.txt` (best effort) |
 | `--track N` | which track of the tab is the bass (1 = first). Normally detected automatically |
 | `--stem FILE` | an isolated bass track: skips the separation |
 | `--tuning "..."` | e.g. `"E Standard"`, `"Drop D"`, `"Eb Standard"`, `"D Standard"`, `"Drop C"`, `"B E A D G"`. If you leave it out, the tuning is taken from the tab, or guessed from the lowest notes (the guess is shown in the report) |

@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 AUDIO_EXT = {".flac", ".wav", ".mp3", ".ogg", ".m4a", ".aac", ".opus", ".wma", ".aiff", ".aif"}
-TAB_EXT = {".gp3", ".gp4", ".gp5", ".gpx", ".gp", ".txt", ".tab"}
+TAB_EXT = {".gp3", ".gp4", ".gp5", ".gpx", ".gp", ".txt", ".tab", ".json"}  # .json: Bass Trainer charts only
 IMG_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
 
@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--artist")
     ap.add_argument("--album")
     ap.add_argument("--year", type=int)
-    ap.add_argument("--tab", help="Guitar Pro (.gp3/.gp4/.gp5/.gpx/.gp) or text tab")
+    ap.add_argument("--tab", help="Guitar Pro (.gp3/.gp4/.gp5/.gpx/.gp), Bass Trainer chart (.btchart.json) or text tab")
     ap.add_argument("--track", type=int, help="track number in the tab file (1 = first); default: auto-detect bass")
     ap.add_argument("--stem", help="isolated bass stem (skips separation)")
     ap.add_argument("--tuning", help='e.g. "E Standard", "Drop D", "D Standard", "B E A D G"')
@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from rs2014conv import config as config_mod
     from rs2014conv.pipeline import SongInputs, run
+    from rs2014conv.tabs import is_btchart
 
     cfg = config_mod.load(Path(args.config) if args.config else None)
     src = Path(args.input).expanduser().resolve()
@@ -58,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
             if song.get(key):
                 return (folder / song[key]).resolve()
             files = sorted(p for p in folder.iterdir() if p.suffix.lower() in exts
-                           and not any(x in p.stem.lower() for x in exclude))
+                           and not any(x in p.stem.lower() for x in exclude)
+                           and (p.suffix.lower() != ".json" or is_btchart(p)))
             return files[0] if files else None
 
         audio = find("audio", AUDIO_EXT, exclude=("bass", "stem", "preview"))

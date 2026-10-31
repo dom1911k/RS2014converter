@@ -1,5 +1,6 @@
-"""Bass tab reading: Guitar Pro 3/4/5 (.gp3/.gp4/.gp5), Guitar Pro 6 (.gpx), Guitar Pro 7/8 (.gp)
-and best-effort plain-text (ASCII) tab.
+"""Bass tab reading: Guitar Pro 3/4/5 (.gp3/.gp4/.gp5), Guitar Pro 6 (.gpx), Guitar Pro 7/8 (.gp),
+Bass Trainer charts (.btchart.json, e.g. exported from a Songsterr bass tab) and best-effort
+plain-text (ASCII) tab.
 
 Everything is converted to a simple TabSong: measures with time signatures / repeats / markers,
 and one track's notes with positions in quarter notes (q). Repeats are expanded by
@@ -9,6 +10,7 @@ and one track's notes with positions in quarter notes (q). Repeats are expanded 
 from __future__ import annotations
 
 import io
+import json
 import re
 import struct
 import zipfile
@@ -548,6 +550,105 @@ def _read_text(path: Path) -> TabSong:
     return TabSong("", "", 120.0, "text tab", tuning, measures, source=".txt")
 
 
+# --------------------------------------------------------------------------- Bass Trainer chart
+
+_SLIDES = {"shift": "shift", "legato": "legato", "outDownwards": "out_down", "outUpwards": "out_up"}
+
+
+def is_btchart(path: Path) -> bool:
+    """A Bass Trainer chart (the browser extension's "bass-chart" JSON)."""
+    if path.suffix.lower() != ".json":
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            head = f.read(4096)
+    except OSError:
+        return False
+    return '"bass-chart"' in head
+
+
+def _read_btchart(path: Path) -> TabSong:
+    """Bass Trainer chart -> TabSong.
+
+    The chart is in seconds with repeats already written out, and every bar has its start,
+    end and time signature. Positions are converted to quarter notes bar by bar (the tempo
+    is taken as constant within a bar) and rounded to 1/240 of a quarter, so straight and
+    triplet rhythms come out exact. The bars are in playing order, so the song has no
+    repeat signs. Timing against the recording is found by the usual tab alignment.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("format") != "bass-chart":
+        raise ValueError(f"{path.name} is not a Bass Trainer chart")
+    meta = data.get("meta") or {}
+    tuning = [int(x) for x in data["instrument"]["tuning"]]  # lowest string first, like TabSong
+    capo = int(data["instrument"].get("capo") or 0)
+    if capo:
+        tuning = [x + capo for x in tuning]
+    bars = sorted(data.get("bars") or [], key=lambda b: b["t"])
+    notes = sorted(data.get("notes") or [], key=lambda n: (n["t"], n["string"]))
+    if not bars:
+        raise ValueError(f"{path.name} has no bars; export it again from the Bass Trainer")
+    sections = {round(float(x["t"]), 3): x.get("name", "") for x in data.get("sections") or []}
+
+    def snap(q: float) -> float:
+        return round(q * 240) / 240
+
+    measures: list[TabMeasure] = []
+    q = 0.0
+    for b in bars:
+        num, den = (b.get("sig") or [4, 4])[:2]
+        m = TabMeasure(start=q, numerator=int(num), denominator=int(den),
+                       marker=sections.get(round(float(b["t"]), 3), ""))
+        seconds = max(1e-3, float(b["end"]) - float(b["t"]))
+        m.tempo = 60.0 * m.length / seconds
+        measures.append(m)
+        q += m.length
+    # Songsterr's timing can squeeze a bar (e.g. the very first one) into a fraction of a
+    # second; such a bar's tempo is meaningless. Use the tab's tempo or the song's typical one.
+    typical = sorted(m.tempo for m in measures)[len(measures) // 2]
+    for m, b in zip(measures, bars):
+        if not typical / 2 <= m.tempo <= typical * 2:
+            m.tempo = float(b["bpm"]) if b.get("bpm") else typical
+
+    def bar_of(t: float) -> int:
+        k = 0
+        for i, b in enumerate(bars):
+            if b["t"] <= t + 1e-4:
+                k = i
+            else:
+                break
+        return k
+
+    last_on_string: dict[int, TabNote] = {}
+    for n in notes:
+        f = n.get("flags") or {}
+        k = bar_of(float(n["t"]))
+        b, m = bars[k], measures[k]
+        sec_per_q = (float(b["end"]) - float(b["t"])) / m.length
+        start = snap(m.start + (float(n["t"]) - float(b["t"])) / sec_per_q)
+        dur = max(1 / 16, snap(float(n.get("dur") or 0) / sec_per_q))
+        slide = f.get("slide") or {}
+        tn = TabNote(start=start, duration=dur, string=int(n["string"]), fret=int(n["fret"]),
+                     dead=bool(f.get("dead")), ghost=bool(f.get("ghost")),
+                     slide=_SLIDES.get(slide.get("type", ""), "") if isinstance(slide, dict) else "",
+                     palm_mute=bool(f.get("palmMute")), harmonic=bool(f.get("harmonic")),
+                     vibrato=bool(f.get("vibrato")), accent=bool(f.get("accent")),
+                     bend=1.0 if f.get("bend") else 0.0)
+        # The chart marks the hammer-on / pull-off destination; Guitar Pro (and this tool)
+        # mark the note before it.
+        prev = last_on_string.get(tn.string)
+        if f.get("hopo") and prev is not None:
+            prev.hammer_to_next = True
+        last_on_string[tn.string] = tn
+        m.notes.append(tn)
+
+    title = str(meta.get("title") or "")
+    if title.lower().startswith("drill: "):
+        title = title[7:]
+    return TabSong(title, str(meta.get("artist") or ""), float(typical), str(meta.get("track") or "bass"),
+                   tuning, measures, source=".btchart.json")
+
+
 # --------------------------------------------------------------------------- entry
 
 def read_tab(path: str | Path, track: int | None = None) -> TabSong:
@@ -558,6 +659,8 @@ def read_tab(path: str | Path, track: int | None = None) -> TabSong:
         song = _read_gp345(path, track_index)
     elif ext in (".gpx", ".gp"):
         song = _read_gpif(path, track_index)
+    elif is_btchart(path):
+        song = _read_btchart(path)
     else:
         song = _read_text(path)
     nnotes = sum(len(m.notes) for m in song.measures)
