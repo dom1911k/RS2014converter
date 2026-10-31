@@ -7,6 +7,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -286,3 +287,92 @@ def test_bass_trainer_chart(tmp_path):
     assert n[4].dead and m2.notes[0].harmonic and m2.notes[0].vibrato and m2.notes[0].duration == 1.0
     lt = unroll(song)
     assert len(lt.measures) == 2 and lt.total_beats == 6 and len(lt.notes) == 6
+
+
+def test_chart_timing_offset_drift_and_repeats():
+    """Songsterr timing: offset and drift are found from the attacks, also in a song that
+    repeats one rhythm bar after bar (where one bar off fits the attacks just as well)."""
+    from rs2014conv.chart_timing import fit_timing
+
+    rng = np.random.default_rng(3)
+    # 200 s of steady eighth notes (a very repetitive song) with a few gaps.
+    notes = np.arange(0, 200, 0.4347826)
+    notes = notes[rng.random(len(notes)) > 0.05]
+    true_off, true_drift = 11.2, -0.0003
+    attacks = notes * (1 + true_drift) + true_off + rng.normal(0, 0.006, len(notes))
+    fit = fit_timing(notes, attacks)
+    assert fit.match > 0.97
+    # Rhythm alone can't tell the bars apart, so the fit may be any whole number of notes away...
+    k = round((fit.offset - true_off) / 0.4347826)
+    assert abs(fit.offset - k * 0.4347826 * (1 + true_drift) - true_off) < 0.02
+    assert abs(fit.drift - true_drift) < 0.0001
+    # ...but the pitches can: with a pitch score the true offset wins.
+    def pitch(f):
+        return 1.0 - min(1.0, abs(f.offset - true_off) * 2)
+    fit = fit_timing(notes, attacks, pitch_score=pitch)
+    assert abs(fit.offset - true_off) < 0.01 and fit.runner_up is not None
+    # An offset from the player only needs refining.
+    assert abs(fit_timing(notes, attacks, center=11.25, pitch_score=pitch).offset - true_off) < 0.01
+    # A different recording (other groove): few notes land on attacks.
+    other = np.sort(notes + rng.normal(0, 0.15, len(notes)) + 3.0)
+    assert fit_timing(notes, other).match < 0.6
+
+
+def test_bass_trainer_host(tmp_path):
+    """The Chrome link: receives a song folder in messages, builds it, reports the result."""
+    import base64
+    import io
+    import time
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "native_host"))
+    import bass_trainer_host as bt
+
+    # Message framing round-trip.
+    buf = io.BytesIO()
+    bt.send({"type": "x", "s": "é"}, buf)
+    buf.seek(0)
+    assert bt.read_message(buf) == {"type": "x", "s": "é"} and bt.read_message(buf) is None
+    # Only plain names inside the songs folder.
+    assert bt.safe_name("..\\..\\Windows\\evil.bat") == "evil.bat"
+    assert bt.safe_name("A/B: c?") == "B_ c_"
+    with pytest.raises(ValueError):
+        bt.safe_name("..")
+
+    # A stand-in for make_cdlc: prints progress, writes output/<song>/report.txt and a .psarc.
+    fake = tmp_path / "fake_make.py"
+    fake.write_text(
+        "import sys, pathlib\n"
+        "song = pathlib.Path(sys.argv[1]); out = song / 'output' / 'Band - Song'; out.mkdir(parents=True)\n"
+        "print('== Reading tab'); print('  Tab: 2 measures')\n"
+        "(out / 'report.txt').write_text('Band - Song\\nPLEASE CHECK:\\n  * Listen at 1:02.\\n\\nrest\\n')\n"
+        "(out / 'Band_Song_v1_p.psarc').write_bytes(b'psarc')\n", encoding="utf-8")
+    sent = []
+    host = bt.Host(write=sent.append, build_cmd=[sys.executable, str(fake)])
+    host.cfg["bass_trainer"] = {"songs_folder": str(tmp_path / "songs")}
+    host.cfg["packaging"]["copy_to_folder"] = ""
+    host.handle({"type": "hello"})
+    assert sent[-1]["type"] == "hello" and sent[-1]["songsDir"] == str(tmp_path / "songs")
+    audio = b"RIFF" + bytes(range(256)) * 40
+    host.handle({"type": "begin", "folder": "Band - Song", "files": [{"name": "song.yaml", "text": "title: Song\n"},
+                                                                      {"name": "../x.btchart.json", "text": "{}"}],
+                 "audio": {"name": "song.wav", "size": len(audio)}})
+    assert sent[-1]["type"] == "ready"
+    for k in range(0, len(audio), 4000):
+        host.handle({"type": "chunk", "data": base64.b64encode(audio[k:k + 4000]).decode()})
+    host.handle({"type": "end"})
+    folder = tmp_path / "songs" / "Band - Song"
+    assert sent[-1] == {"type": "saved", "dir": str(folder)}
+    assert (folder / "song.wav").read_bytes() == audio and (folder / "x.btchart.json").exists()
+    host.handle({"type": "build"})
+    for _ in range(100):
+        if sent[-1]["type"] == "done":
+            break
+        time.sleep(0.05)
+    done = sent[-1]
+    assert done["ok"] and done["psarc"].endswith("Band_Song_v1_p.psarc") and done["checks"] == ["Listen at 1:02."]
+    assert any(m == {"type": "step", "text": "Reading tab"} for m in sent)
+    # A short upload is caught.
+    host.handle({"type": "begin", "folder": "Other", "files": [], "audio": {"name": "a.wav", "size": 10}})
+    host.handle({"type": "chunk", "data": base64.b64encode(b"abc").decode()})
+    with pytest.raises(ValueError):
+        host.handle({"type": "end"})

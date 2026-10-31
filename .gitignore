@@ -9,3 +9,6 @@ packager/obj/
 packager/publish/
 .pytest_cache/
 upload/
+# Songs sent from the Bass Trainer extension, and the generated Chrome host manifest
+songs/
+native_host/com.basstrainer.rs2014converter.json

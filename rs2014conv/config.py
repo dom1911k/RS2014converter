@@ -31,11 +31,12 @@ DEFAULTS: dict = {
         "min_sustain_beats": 0.75,
     },
     "tab": {"min_sustain_beats": 1.0, "detect_tuning_shift": True, "snap_to_onsets": False,
-            "snap_tolerance": 0.04},
+            "snap_tolerance": 0.04, "use_chart_timing": True, "chart_timing_min_match": 0.6},
     "fingering": {"max_fret": 24, "shift_cost": 1.0, "height_cost": 0.01, "string_jump_cost": 0.3,
                   "open_string_bonus": 0.15},
     "sections": {"auto_detect": True, "min_bars": 8, "phrase_bars": 8},
     "check_mix": {"clicks": True, "synth_gain_db": 0.0, "split_file": True, "format": "wav"},
+    "bass_trainer": {"songs_folder": ""},
     "packaging": {
         "enabled": True,
         "packager_path": "",
@@ -47,7 +48,7 @@ DEFAULTS: dict = {
 }
 
 SONG_KEYS = {"audio", "title", "artist", "album", "year", "tab", "track", "stem", "tuning", "strings",
-             "cover", "grid", "bass_picked", "version", "output_dir"}
+             "cover", "grid", "bass_picked", "version", "output_dir", "chart_offset"}
 
 
 def _merge(base: dict, extra: dict) -> dict:

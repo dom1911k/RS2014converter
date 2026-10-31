@@ -99,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         tuning=pick("tuning"), strings=int(pick("strings", cfg["strings"]) or 4), cover=cover,
         grid=pick("grid"), bass_picked=True if args.picked else song.get("bass_picked"),
         version=str(song.get("version", "1")),
+        chart_offset=float(song["chart_offset"]) if song.get("chart_offset") is not None else None,
         output_dir=Path(out).resolve() if out else (folder / "output" if folder else None),
     )
     for p in (inp.audio, inp.tab, inp.stem, inp.cover):

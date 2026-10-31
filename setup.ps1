@@ -7,6 +7,7 @@
 #   4. Rocksmith2014.NET source (the library behind DLC Builder)
 #   5. The .NET 10 SDK        (winget) and builds the packager (packager\publish\RsPackager.exe)
 # and checks for Wwise, which you install yourself (see README).
+# Finally it connects the converter to the Bass Trainer browser extension (one-click "Build CDLC").
 
 # "Continue": native tools (pip, py, dotnet) write progress to stderr, which must not abort the
 # script in Windows PowerShell 5.1. Every step checks $LASTEXITCODE instead.
@@ -31,7 +32,7 @@ function Refresh-Path {
 function Has-Winget { return [bool](Get-Command winget -ErrorAction SilentlyContinue) }
 
 # ---------------------------------------------------------------- 1. Python
-Step "1/6 Python 3.12"
+Step "1/7 Python 3.12"
 $py = $null
 if (Get-Command py -ErrorAction SilentlyContinue) {
     & py -3.12 -c "import sys" 2>$null
@@ -49,7 +50,7 @@ if (-not $py) {
 Ok "Python 3.12"
 
 # ---------------------------------------------------------------- 2. venv + packages
-Step "2/6 Python packages (this downloads a few GB the first time)"
+Step "2/7 Python packages (this downloads a few GB the first time)"
 $venvPy = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPy)) {
     & $py[0] $py[1] -m venv (Join-Path $Root ".venv")
@@ -72,12 +73,12 @@ if ($LASTEXITCODE -ne 0) { Fail "Installing the Python packages failed (see the 
 Ok "Python packages"
 
 # ---------------------------------------------------------------- 3. models
-Step "3/6 AI models (downloaded once)"
+Step "3/7 AI models (downloaded once)"
 & $venvPy -m rs2014conv.download_models
 if ($LASTEXITCODE -ne 0) { Warn "Some models could not be downloaded. You can run setup.bat again later." } else { Ok "models" }
 
 # ---------------------------------------------------------------- 4. Rocksmith2014.NET
-Step "4/6 Rocksmith2014.NET (DLC Builder's library)"
+Step "4/7 Rocksmith2014.NET (DLC Builder's library)"
 $rsnet = Join-Path $Root "third_party\Rocksmith2014.NET"
 if (-not (Test-Path (Join-Path $rsnet "src\Rocksmith2014.DLCProject"))) {
     if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $Root ".git"))) {
@@ -99,7 +100,7 @@ if (-not (Test-Path (Join-Path $rsnet "src\Rocksmith2014.DLCProject"))) {
 Ok "Rocksmith2014.NET"
 
 # ---------------------------------------------------------------- 5. .NET SDK + packager
-Step "5/6 .NET 10 SDK and the packager"
+Step "5/7 .NET 10 SDK and the packager"
 Refresh-Path
 $hasSdk = $false
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
@@ -118,7 +119,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Building the packager failed (see the messages 
 Ok "packager\publish\RsPackager.exe"
 
 # ---------------------------------------------------------------- 6. Wwise
-Step "6/6 Wwise (needed to convert the audio for Rocksmith)"
+Step "6/7 Wwise (needed to convert the audio for Rocksmith)"
 $wwise = @()
 foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
     if ($pf -and (Test-Path (Join-Path $pf "Audiokinetic"))) {
@@ -139,6 +140,31 @@ if (Test-Path $dlc) {
     Write-Host "   Your Rocksmith dlc folder: $dlc"
     Write-Host "   Tip: set packaging -> copy_to_folder in config.yaml to this path to install CDLC automatically."
 }
+
+# ---------------------------------------------------------------- 7. Bass Trainer link
+# Registers native_host\bass_trainer_host.bat with Chrome (and Edge / Brave) as a "native
+# messaging host", so the Bass Trainer extension's player can hand a song to this tool.
+# Only that extension (fixed ID) may start it. Per user (HKCU), no admin rights needed.
+Step "7/7 Connect to the Bass Trainer browser extension"
+$hostName = "com.basstrainer.rs2014converter"
+$extensionId = "gbbniikkcomblgdcdmbcanlcilmaeohh"
+$hostBat = Join-Path $Root "native_host\bass_trainer_host.bat"
+$hostJson = Join-Path $Root "native_host\$hostName.json"
+$manifest = [ordered]@{
+    name = $hostName
+    description = "RS2014converter for the Bass Trainer extension"
+    path = $hostBat
+    type = "stdio"
+    allowed_origins = @("chrome-extension://$extensionId/")
+}
+# UTF-8 without BOM (a user folder may have non-ASCII letters).
+[IO.File]::WriteAllText($hostJson, ($manifest | ConvertTo-Json), (New-Object System.Text.UTF8Encoding $false))
+foreach ($browserKey in @("Software\Google\Chrome", "Software\Microsoft\Edge", "Software\BraveSoftware\Brave-Browser")) {
+    $key = "HKCU:\$browserKey\NativeMessagingHosts\$hostName"
+    New-Item -Path $key -Force | Out-Null
+    Set-ItemProperty -Path $key -Name "(default)" -Value $hostJson
+}
+Ok "Bass Trainer can now build CDLC with one click (reload the Bass Trainer extension / its player page)."
 
 Write-Host ""
 Write-Host "Setup finished." -ForegroundColor Green

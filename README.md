@@ -59,6 +59,7 @@ Double-click **`setup.bat`**. It installs only what is missing:
 | the AI models (downloaded once) | so it works offline afterwards |
 | Rocksmith2014.NET source (DLC Builder's library) | to build the `.psarc` |
 | .NET 10 SDK, then it builds `packager\publish\RsPackager.exe` | the headless packager |
+| the link to the Bass Trainer browser extension (Chrome, Edge, Brave) | one-click **Build CDLC** from the extension |
 
 It takes 10–30 minutes the first time and needs a few GB of downloads. You can run `setup.bat`
 again at any time; it only repairs or updates what's needed. At the end it tells you if Wwise was found.
@@ -116,19 +117,28 @@ something, run the same command again. Separation and beat tracking are cached, 
 
 ### Way 3: from a Songsterr bass tab (with the Bass Trainer extension)
 
-The [Bass Trainer](https://github.com/dom1911k/SngstrrXRcksmth) browser extension can export the
-bass tab you have open on Songsterr as a ready song folder:
+The [Bass Trainer](https://github.com/dom1911k/SngstrrXRcksmth) browser extension turns the bass
+tab you have open on Songsterr into a CDLC:
 
 1. Open the song's bass tab on Songsterr. In the BASS TRAINER panel → **Song & highway**, click
-   **RS2014 CDLC kit**. A ZIP downloads with `song.yaml` (title, artist, tuning) and the tab as
-   `Artist - Title.btchart.json` (notes, rhythms, sections and techniques).
-2. Unzip it and put **the song's audio file** in the folder (one you own: CD rip, purchased
-   download…). Songsterr's tab follows its own recording, so the same recording lines up best;
-   another version of the song works too, the tab is aligned beat by beat.
-3. Drag the folder onto **`drop_song_folder_here.bat`**.
+   **RS2014 CDLC kit**. The extension's player opens with the **RS2014 CDLC kit** card.
+2. **Choose audio file…**: the song's recording, one you own (CD rip, purchased download…).
+3. **Auto-sync** finds where the tab starts in your file; **Play from the first note** to check
+   by ear (nudge if needed).
+4. **Build CDLC**: the song is saved in this tool's `songs` folder and built; you see the
+   progress and the report's "please check" points in the browser. With `copy_to_folder` set
+   (section 1d) the `.psarc` goes straight into Rocksmith.
 
-`.btchart.json` files are picked up automatically in a song folder, like Guitar Pro files.
-A chart made from Songsterr's tab is for your own use: don't upload it.
+The Build button appears after `setup.bat` has run once (it connects this tool to Chrome, Edge
+and Brave; reload the extension afterwards). Without it, use **Download kit (ZIP)** in the card:
+unzip it and drag the folder onto **`drop_song_folder_here.bat`**.
+
+The kit's `song.yaml` names the tab (`Artist - Title.btchart.json`: notes, rhythms, sections and
+techniques), the audio and `chart_offset` (where the tab starts in your audio). The tab knows the
+timing of Songsterr's recording: if your audio is that recording, those times are used directly
+(see "Songsterr timing" below); another version of the song works too, then the tab is aligned
+beat by beat. `.btchart.json` files are picked up automatically in a song folder, like Guitar
+Pro files. A chart made from Songsterr's tab is for your own use: don't upload it.
 
 ### All options
 
@@ -234,6 +244,13 @@ put `version: "2"` in `song.yaml`.
      clearly off the grid in the recording (15–40 ms) are nudged onto the attacks heard in the bass
      stem. Techniques from the tab are kept:
      hammer-on/pull-off, slides, palm mute, dead notes, harmonics, vibrato, bends, slap/pop, tapping, accents.
+   * *Songsterr timing* (Bass Trainer charts): the chart knows when each bar starts in Songsterr's
+     recording. The chart's plucked notes are matched against the attacks in the bass stem: the
+     offset (where the chart starts in your file) comes from a histogram of attack-minus-note
+     times, a slightly different speed from a straight-line fit, and in songs that repeat a riff
+     bar after bar the pitches decide which bar is which. If at least 60 % of the notes then land
+     on an attack (`tab: chart_timing_min_match`), these times are used (typically within a few ms);
+     otherwise the beat-by-beat alignment above runs. `chart_offset` from the player narrows the search.
    * *No tab*: CREPE pitch tracking (GPU) and onset detection split the stem into notes. Attacks
      come from three detectors: spectral change, level jumps, and the 1–3 kHz click of the finger on
      the string, which finds repeated notes of the same pitch. Each note's semitone is checked

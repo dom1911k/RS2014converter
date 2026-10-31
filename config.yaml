@@ -50,6 +50,10 @@ tab:
   # clearly ahead of / behind the beat. Off = notes sit exactly on the beat grid (cleaner chart).
   snap_to_onsets: false
   snap_tolerance: 0.04
+  # Bass Trainer charts (.btchart.json from a Songsterr tab) know the timing of Songsterr's
+  # recording. If your audio is that recording, use those times instead of aligning beat by beat.
+  use_chart_timing: true
+  chart_timing_min_match: 0.6   # share of plucked notes that must land on an attack in your audio
 
 sections:
   auto_detect: true       # without tab markers: find verse/chorus/... from the audio
@@ -69,3 +73,8 @@ packaging:
   # Copy the finished .psarc here, e.g. your Rocksmith dlc folder:
   # copy_to_folder: 'C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014\dlc'
   copy_to_folder: ""
+
+bass_trainer:
+  # Where songs sent from the Bass Trainer browser extension ("Build CDLC") are saved,
+  # one folder per song. Empty = the "songs" folder inside this tool's folder.
+  songs_folder: ''

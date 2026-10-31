@@ -38,6 +38,7 @@ class SongInputs:
     bass_picked: bool | None = None
     version: str = "1"
     output_dir: Path | None = None
+    chart_offset: float | None = None  # Bass Trainer charts: audio time of chart time 0 (from the player)
 
 
 @dataclass
@@ -225,7 +226,28 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
             tuning_note = f"{tuning.describe(tun)} (from the tab)"
         step("Aligning tab to audio")
         lt = tab_align.unroll(song)
-        al = tab_align.align(lt, tun, stem_path, bm, try_shifts=cfg["tab"]["detect_tuning_shift"] and not inp.tuning)
+        al = None
+        if cfg["tab"].get("use_chart_timing", True) and any(m.seconds for m in song.measures):
+            # A chart from a Songsterr tab knows the times of Songsterr's recording: if this is
+            # that recording, use them (more exact than aligning beat by beat).
+            from . import chart_timing
+
+            al, fit = chart_timing.align_from_chart(lt, stem_path, inp.chart_offset,
+                                                    float(cfg["tab"].get("chart_timing_min_match", 0.6)), tun)
+            if al is not None:
+                report.add(f"Timing: Songsterr's timing, offset {fit.offset:+.3f} s"
+                           + (f", drift {fit.drift * 60e3:+.1f} ms/min" if fit.drift else "")
+                           + f" ({fit.match:.0%} of the plucked notes land on the recording's attacks)")
+                if fit.runner_up is not None and inp.chart_offset is None:
+                    report.check(f"The song repeats a lot: Songsterr's timing also fits {fit.runner_up - fit.offset:+.2f} s "
+                                 "away. Listen to the check mix; if the chart is off, set the offset in the Bass "
+                                 "Trainer player (RS2014 kit) and build again.")
+            elif fit is not None:
+                info("The audio doesn't follow Songsterr's recording closely: aligning beat by beat instead.")
+                report.add(f"Timing: aligned beat by beat (Songsterr's timing fit only {fit.match:.0%} of the notes: "
+                           "a different recording or version)")
+        if al is None:
+            al = tab_align.align(lt, tun, stem_path, bm, try_shifts=cfg["tab"]["detect_tuning_shift"] and not inp.tuning)
         if al.pitch_shift:
             tun = [p + al.pitch_shift for p in tun]
             tuning_note = f"{tuning.describe(tun)} (tab tuning shifted {al.pitch_shift:+d} to match the recording)"

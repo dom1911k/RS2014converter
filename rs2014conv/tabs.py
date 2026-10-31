@@ -59,6 +59,7 @@ class TabMeasure:
     jump: str = ""  # e.g. "DaCapo", "DaSegnoAlCoda"
     notes: list[TabNote] = field(default_factory=list)
     tempo: float | None = None  # tempo change at the start of this measure (quarter BPM)
+    seconds: tuple[float, float] | None = None  # start/end in the source recording (Bass Trainer charts)
 
     @property
     def length(self) -> float:
@@ -598,7 +599,8 @@ def _read_btchart(path: Path) -> TabSong:
     for b in bars:
         num, den = (b.get("sig") or [4, 4])[:2]
         m = TabMeasure(start=q, numerator=int(num), denominator=int(den),
-                       marker=sections.get(round(float(b["t"]), 3), ""))
+                       marker=sections.get(round(float(b["t"]), 3), ""),
+                       seconds=(float(b["t"]), float(b["end"])))
         seconds = max(1e-3, float(b["end"]) - float(b["t"]))
         m.tempo = 60.0 * m.length / seconds
         measures.append(m)
