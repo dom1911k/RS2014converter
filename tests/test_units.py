@@ -433,3 +433,44 @@ def test_desktop_and_maker(tmp_path, monkeypatch):
     names = [s.title for _, s, _ in maker.list_songs(tmp_path / "songs")]
     assert set(names) == {"Song", "Hysteria"}
     assert maker.Song(title="T", artist="A", audio=str(tmp_path / "gone.mp3")).missing() == ["the audio file"]
+
+
+def test_packaging_failure_and_repackage(tmp_path, monkeypatch):
+    """A failed .psarc explains itself; 'Build the .psarc again' only reruns the packager."""
+    import os
+
+    from rs2014conv import config, maker, repackage
+    from rs2014conv.pipeline import packaging_hint
+
+    assert "Wwise 2023 wasn't found" in packaging_hint("Error: Could not locate Wwise 2019/2021/2022/2023 installation")
+    assert "2024/2025" in packaging_hint("Unsupported Wwise version (2025.1.0.123).")
+    assert "Start Wwise once" in packaging_hint("WWise conversion failed with exit code 2. No console output.")
+    assert packaging_hint("something else") == ""
+
+    out = tmp_path / "song" / "output" / "Band - Song"
+    (out / "project").mkdir(parents=True)
+    (out / "project" / "Band_Song.rs2dlc").write_text("{}", encoding="utf-8")
+    (out / "report.txt").write_text(
+        "Band - Song\nl2\nl3\nl4\nl5\nPLEASE CHECK:\n  * The tuning was guessed: E Standard.\n"
+        "  * Wwise 2023 wasn't found, so the .psarc couldn't be made.\n\nTuning: E\n\n"
+        "Packaging: FAILED - Could not locate Wwise\n  -> Wwise 2023 wasn't found\n\nFiles:\n  CDLC:        (not built)\n",
+        encoding="utf-8")
+    r = maker.latest_result(tmp_path / "song")
+    assert r.psarc is None and r.rs2dlc.name == "Band_Song.rs2dlc" and r.packaging.startswith("Packaging: FAILED")
+    # A stand-in packager that "builds" the .psarc.
+    fake = tmp_path / "fake_packager.py"
+    fake.write_text("#!/usr/bin/env python3\nimport sys, pathlib\nout = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])\n"
+                    "p = out / 'Band_Song_v1_p.psarc'; p.write_bytes(b'psarc'); print('BUILT ' + str(p))\n", encoding="utf-8")
+    os.chmod(fake, 0o755)
+    monkeypatch.setattr(config, "USER_SETTINGS", tmp_path / "settings.yaml")
+    config.save_user_setting("packaging", "packager_path", str(fake))
+    config.save_user_setting("packaging", "copy_to_folder", "")
+    psarc = repackage.repackage(out)
+    assert psarc and psarc.exists()
+    text = (out / "report.txt").read_text(encoding="utf-8")
+    assert "The tuning was guessed" in text and "Wwise 2023 wasn't found" not in text
+    assert "Packaging: headless build with RsPackager" in text and "FAILED" not in text
+    assert f"CDLC:        {psarc}" in text
+    r = maker.latest_result(tmp_path / "song")
+    assert r.psarc == psarc and r.checks == ["The tuning was guessed: E Standard."]
+    assert maker.repackage_command(out)[-2:] == ["rs2014conv.repackage", str(out)]

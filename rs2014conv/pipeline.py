@@ -525,6 +525,20 @@ def _write_eof(proj_dir: Path, audio_path: Path, xml_path: Path, cfg: dict) -> P
         return None
 
 
+def packaging_hint(output: str) -> str:
+    """Plain-language reason for a failed .psarc build (from the packager's output), or ''."""
+    if re.search(r"Could not (locate|find) Wwise|Wwise Console executable|appears to be wrong", output, re.I):
+        return ("Wwise 2023 wasn't found, so the .psarc couldn't be made. Install Wwise 2023.1.x with its "
+                "'Authoring' package (see README, 'Wwise'), then use 'Build the .psarc again' in the CDLC Maker.")
+    if re.search(r"Unsupported Wwise version", output, re.I):
+        return ("Your Wwise is a version the Rocksmith tools can't use: install 2023.1.x in the Audiokinetic "
+                "Launcher (not 2024/2025), then use 'Build the .psarc again' in the CDLC Maker.")
+    if re.search(r"WWise conversion failed|converted Wwise audio", output, re.I):
+        return ("Wwise couldn't convert the audio. Start Wwise once (Launcher -> Wwise 2023 -> Launch), wait "
+                "until it has opened, close it, then use 'Build the .psarc again' in the CDLC Maker.")
+    return ""
+
+
 def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | None:
     cmd = find_packager(cfg)
     if not cmd:
@@ -536,8 +550,13 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
         return None
     pc = cfg["packaging"]
     args = cmd + ["build", str(rs2dlc), "--out", str(out_dir)]
-    if pc.get("wwise_console"):
-        args += ["--wwise", pc["wwise_console"]]
+    # The Wwise we found (newest 2019-2023 with WwiseConsole.exe), not just the first folder
+    # the packager would pick in Program Files\Audiokinetic.
+    from .desktop import find_wwise
+
+    wwise = pc.get("wwise_console") or (str(find_wwise(cfg) or "") if sys.platform == "win32" else "")
+    if wwise:
+        args += ["--wwise", wwise]
     if pc.get("auto_volume"):
         args.append("--auto-volume")
     if pc.get("mac"):
@@ -560,9 +579,10 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
         err = (proc.stderr or "").strip().splitlines()
         warn("Packaging failed: " + (err[-1] if err else f"exit code {proc.returncode}"))
         report.add("Packaging: FAILED - " + (" ".join(err[-3:]) if err else ""))
-        report.check("Building the .psarc failed - see 'Packaging' below.")
-        if "Wwise" in (proc.stderr or ""):
-            report.add("  -> Install Wwise 2023 (see README, 'Wwise') or set packaging.wwise_console in config.yaml.")
+        hint = packaging_hint((proc.stderr or "") + "\n" + (proc.stdout or ""))
+        report.check(hint or "Building the .psarc failed - see 'Packaging' below.")
+        if hint:
+            report.add(f"  -> {hint}")
         return None
     report.add("Packaging: headless build with RsPackager (DD generation off) - OK")
     for v in verify:

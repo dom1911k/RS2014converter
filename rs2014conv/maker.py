@@ -149,12 +149,19 @@ def build_command(folder: Path) -> list[str]:
     return [sys.executable, str(config.ROOT / "make_cdlc.py"), str(folder)]
 
 
+def repackage_command(out_dir: Path) -> list[str]:
+    """Only the .psarc again (after installing Wwise, say): seconds instead of minutes."""
+    return [sys.executable, "-m", "rs2014conv.repackage", str(out_dir)]
+
+
 @dataclass
 class Result:
     out_dir: Path | None
     psarc: Path | None
     checks: list[str]
     check_mix: Path | None
+    rs2dlc: Path | None = None  # the project: the .psarc can be built again from it
+    packaging: str = ""         # the report's "Packaging: ..." line
 
 
 def report_checks(report: Path) -> list[str]:
@@ -182,7 +189,11 @@ def latest_result(folder: Path) -> Result | None:
     out = reports[-1].parent
     psarcs = sorted(out.glob("*.psarc"), key=lambda p: p.stat().st_mtime)
     mixes = sorted((out / "review").glob("check_mix*.wav")) if (out / "review").exists() else []
-    return Result(out, psarcs[-1] if psarcs else None, report_checks(reports[-1]), mixes[0] if mixes else None)
+    projects = sorted((out / "project").glob("*.rs2dlc")) if (out / "project").exists() else []
+    packaging = next((ln for ln in reports[-1].read_text(encoding="utf-8", errors="replace").splitlines()
+                      if ln.startswith("Packaging:")), "")
+    return Result(out, psarcs[-1] if psarcs else None, report_checks(reports[-1]), mixes[0] if mixes else None,
+                  projects[0] if projects else None, packaging)
 
 
 def list_songs(base: Path | None = None) -> list[tuple[Path, Song, Result | None]]:

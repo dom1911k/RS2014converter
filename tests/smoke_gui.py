@@ -15,8 +15,16 @@ kit = tmp / 'songs' / "Band - Love That's Gone"; kit.mkdir(parents=True)
 fake = tmp / 'fake_make.py'
 fake.write_text("import sys, pathlib, time\nsong = pathlib.Path(sys.argv[1]); out = song / 'output' / 'Band - Song'; (out / 'review').mkdir(parents=True, exist_ok=True)\n"
                 "for s in ['Bass stem', 'Beat map', 'Reading tab', 'Aligning tab to audio', 'Packaging']:\n    print('== ' + s, flush=True); time.sleep(0.2)\n"
-                "(out / 'report.txt').write_text('x\\nPLEASE CHECK:\\n  * Measures 12-13: tab and recording disagree, listen at 0:41.\\n\\n')\n"
-                "(out / 'Band_Song_v1_p.psarc').write_bytes(b'p'); (out / 'review' / 'check_mix.wav').write_bytes(b'w')\n")
+                "(out / 'report.txt').write_text('x\\nPLEASE CHECK:\\n  * Measures 12-13: tab and recording disagree, listen at 0:41.\\n'\n"
+                "  '  * Wwise couldn\\'t convert the audio. Start Wwise once, then use Build the .psarc again.\\n\\nPackaging: FAILED - x\\n')\n"
+                "(out / 'project').mkdir(exist_ok=True); (out / 'project' / 'Band_Song.rs2dlc').write_text('{}')\n"
+                "(out / 'review' / 'check_mix.wav').write_bytes(b'w')\n")
+# 'Build the .psarc again': a stand-in that makes the .psarc and updates the report.
+refake = tmp / 'fake_repack.py'
+refake.write_text("import sys, pathlib\nout = pathlib.Path(sys.argv[1]); print('== Packaging', flush=True)\n"
+                  "(out / 'Band_Song_v1_p.psarc').write_bytes(b'p')\n"
+                  "(out / 'report.txt').write_text('x\\nPLEASE CHECK:\\n  * Measures 12-13: tab and recording disagree, listen at 0:41.\\n\\nPackaging: headless build - OK\\n')\n")
+maker.repackage_command = lambda out: [sys.executable, str(refake), str(out)]
 maker.build_command = lambda folder: [sys.executable, str(fake), str(folder)]
 from importlib.machinery import SourceFileLoader; m = SourceFileLoader('cdlc_maker', str(ROOT / 'app' / 'cdlc_maker.pyw')).load_module()
 import tkinter as tk
@@ -27,6 +35,12 @@ def pump(sec):
 pump(1)
 out = {'songs': list(app.listbox.get(0, 'end')), 'title': app.fields['title'].get(), 'audio': app.fields['audio'].get(), 'step': app.step_lbl.cget('text')}
 app.make(); pump(0.4); out['during'] = app.step_lbl.cget('text')
+t0 = time.time()
+while app.proc and time.time() - t0 < 20: pump(0.2)
+pump(0.5)
+out['failedStep'] = app.step_lbl.cget('text')
+out['repackVisible'] = app.repack_btn.winfo_ismapped()
+app.repackage(); pump(0.3)
 t0 = time.time()
 while app.proc and time.time() - t0 < 20: pump(0.2)
 pump(0.5)

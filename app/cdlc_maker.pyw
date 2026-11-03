@@ -11,6 +11,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from pathlib import Path
@@ -149,6 +150,7 @@ class App:
         results.pack(fill="x", pady=(8, 0))
         self.out_btn = ttk.Button(results, text="Open output folder", command=lambda: self.result and open_path(self.result.out_dir))
         self.mix_btn = ttk.Button(results, text="▶ Listen to the check mix", command=lambda: self.result and self.result.check_mix and open_path(self.result.check_mix))
+        self.repack_btn = ttk.Button(results, text="⟳ Build the .psarc again", command=self.repackage)
         self.report_btn = ttk.Button(results, text="Report", command=lambda: self.result and open_path(self.result.out_dir / "report.txt"))
         self.progress = ttk.Progressbar(right, mode="indeterminate")
         self.step_lbl = ttk.Label(right, text="", style="Panel.TLabel")
@@ -252,14 +254,17 @@ class App:
 
     def show_result(self, res: maker.Result | None):
         self.result = res
-        for b in (self.out_btn, self.mix_btn, self.report_btn):
+        for b in (self.out_btn, self.mix_btn, self.report_btn, self.repack_btn):
             b.pack_forget()
         if res:
+            if not res.psarc and res.rs2dlc:
+                self.repack_btn.pack(side="left", padx=(0, 8))
             self.out_btn.pack(side="left")
             if res.check_mix:
                 self.mix_btn.pack(side="left", padx=(8, 0))
             self.report_btn.pack(side="left", padx=(8, 0))
-            done = "✓ CDLC made" if res.psarc else "Made everything except the .psarc (Wwise missing?)"
+            done = "✓ CDLC made" if res.psarc else ("Made everything except the .psarc. Fix what's listed below, then "
+                                                    "press ⟳ Build the .psarc again (takes seconds).")
             self.step_lbl.configure(text=done, style="Ok.TLabel" if res.psarc else "Warn.TLabel")
             self.checks_lbl.configure(text=("Please check:\n• " + "\n• ".join(res.checks)) if res.checks else "Nothing special to check. Still listen to the check mix once.")
         else:
@@ -326,15 +331,25 @@ class App:
         folder = maker.save_song(s)
         self.song = s
         self.refresh_songs(keep=folder)
+        self._run(maker.build_command(folder), folder, "Starting… (the first song takes a few minutes; later ones are faster)")
+
+    def repackage(self):
+        if self.proc or not self.result or not self.song or not self.song.folder:
+            return
+        self.refresh_status()
+        self._run(maker.repackage_command(self.result.out_dir), self.song.folder, "Building the .psarc…")
+
+    def _run(self, cmd: list[str], folder: Path, first: str):
         self.show_result(None)
         self.log.delete("1.0", "end")
-        self.step_lbl.configure(text="Starting… (the first song takes a few minutes; later ones are faster)")
+        self.step_lbl.configure(text=first, style="Panel.TLabel")
         self.make_btn.configure(state="disabled")
         self.cancel_btn.pack(side="left", padx=(8, 0))
         self.progress.pack(fill="x", before=self.step_lbl)
         self.progress.start(12)
+        self.run_started = time.time()
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
-        self.proc = subprocess.Popen(maker.build_command(folder), cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        self.proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         threading.Thread(target=self._read, args=(self.proc, folder), daemon=True).start()
 
@@ -366,7 +381,8 @@ class App:
         self.make_btn.configure(state="normal")
         res = maker.latest_result(folder)
         self.refresh_songs(keep=folder)
-        if code == 0 and res:
+        # Only a report written by this run counts (a stopped run leaves the old one).
+        if res and (res.out_dir / "report.txt").stat().st_mtime >= self.run_started - 1:
             self.show_result(res)
             if res.psarc:
                 cfg = config.load(None)

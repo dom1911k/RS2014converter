@@ -362,6 +362,7 @@ report says how far off it was.
 |---|---|
 | `Setup has not been run yet` | double-click `setup.bat` |
 | `Could not find Wwise ... installation` | install Wwise **2023** (section 1a) and start it once. If it's installed somewhere unusual, set `packaging: wwise_console:` in `config.yaml` to the full path of `WwiseConsole.exe` (in `Authoring\x64\Release\bin`) |
+| **No .psarc** (report: "Made everything except the .psarc") | the report says why (Wwise missing, wrong version, or never started once). Fix that, then in the CDLC Maker click the song and press **⟳ Build the .psarc again**: only the last step runs again, in seconds (or `python -m rs2014conv.repackage "<song>\output\<Artist - Title>"`) |
 | `Beat This! not used ...` | the beat model isn't downloaded yet. Its download server is run by the model's authors and is sometimes down for maintenance (status: <https://github.com/CPJKU/beat_this/issues>). Run `setup.bat` again later. Until then the fallback tracker is used: fine on steady songs, but listen to the clicks in the check mix |
 | `RsPackager is not built` | run `setup.bat` again and look for errors in step 5 |
 | `The chosen tab track has no notes` | use `--track N` |
