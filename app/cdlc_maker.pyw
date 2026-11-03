@@ -167,7 +167,11 @@ class App:
         cfg = config.load(None)
         dest = (cfg.get("packaging") or {}).get("copy_to_folder") or ""
         self.dlc_lbl.configure(text=f"Finished CDLC go to: {dest}" if dest else "Finished CDLC stay in each song's output folder (no Rocksmith dlc folder set)")
-        if find_wwise(cfg):
+        wwise = find_wwise(cfg)
+        if wwise:
+            # Remember it: builds started from Chrome may not see where Wwise is installed.
+            if (cfg.get("packaging") or {}).get("wwise_console") != str(wwise):
+                config.save_user_setting("packaging", "wwise_console", str(wwise))
             self.wwise_lbl.configure(text="Wwise ✓", style="Ok.TLabel")
             self.wwise_btn.pack_forget()
         else:

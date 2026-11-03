@@ -63,14 +63,34 @@ def find_rocksmith_dlc(steam_roots: list[Path] | None = None) -> Path | None:
     return None
 
 
+def _registry_env(name: str) -> list[str]:
+    """An environment variable as stored in Windows (user, then system), not as this process
+    inherited it: a program started before Wwise was installed (e.g. Chrome, and so the Bass
+    Trainer link) doesn't have WWISEROOT yet."""
+    if sys.platform != "win32":
+        return []
+    import winreg
+
+    out = []
+    for hive, key in ((winreg.HKEY_CURRENT_USER, r"Environment"),
+                      (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                out.append(os.path.expandvars(str(winreg.QueryValueEx(k, name)[0])))
+        except OSError:
+            pass
+    return out
+
+
 def find_wwise(cfg: dict | None = None) -> Path | None:
     """WwiseConsole.exe of an installed Wwise 2019-2023, or None."""
     given = ((cfg or {}).get("packaging") or {}).get("wwise_console")
     if given and Path(given).exists():
         return Path(given)
     bases = []
-    if os.environ.get("WWISEROOT"):
-        bases.append(Path(os.environ["WWISEROOT"]))
+    for root in ([os.environ["WWISEROOT"]] if os.environ.get("WWISEROOT") else []) + _registry_env("WWISEROOT"):
+        if root and Path(root) not in bases:
+            bases.append(Path(root))
     for pf in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
         if pf and (Path(pf) / "Audiokinetic").is_dir():
             bases += sorted((d for d in (Path(pf) / "Audiokinetic").iterdir()
@@ -115,11 +135,14 @@ def setup() -> int:
         else:
             print("   Rocksmith 2014 not found in Steam: finished CDLC stay in each song's output folder.")
             print("   (You can choose the dlc folder later in the CDLC Maker app.)")
+    wwise = find_wwise(cfg)
+    if wwise and not (config.load_user_settings().get("packaging") or {}).get("wwise_console"):
+        config.save_user_setting("packaging", "wwise_console", str(wwise))
     try:
         make_icon(ROOT / "app" / "icon.ico")
     except Exception as e:  # noqa: BLE001 - the icon is optional
         print(f"   (no icon: {e})")
-    return 0 if find_wwise(cfg) else 3   # 3 = Wwise missing
+    return 0 if wwise else 3   # 3 = Wwise missing
 
 
 if __name__ == "__main__":

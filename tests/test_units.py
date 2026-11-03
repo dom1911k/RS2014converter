@@ -504,3 +504,20 @@ def test_song_folder_keys(tmp_path, monkeypatch):
         assert seen["inp"].tab is not None and seen["inp"].tab.name == Path(expect).name, name
         assert isinstance(seen["cfg"]["tab"], dict) and seen["cfg"]["tab"]["min_sustain_beats"] == 1.0
         assert seen["cfg"]["transcription"]["onset_sensitivity"] == 0.7   # a real settings section still works
+
+
+def test_find_wwise_outside_the_environment(tmp_path, monkeypatch):
+    """Wwise installed after Chrome started: WWISEROOT is only in Windows' stored environment."""
+    from rs2014conv import desktop
+
+    exe = tmp_path / "D" / "MyWwise" / "Authoring" / "x64" / "Release" / "bin" / "WwiseConsole.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+    monkeypatch.delenv("WWISEROOT", raising=False)
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("ProgramFiles", raising=False)
+    monkeypatch.setattr(desktop, "_registry_env", lambda name: [])
+    assert desktop.find_wwise({}) is None
+    monkeypatch.setattr(desktop, "_registry_env", lambda name: [str(tmp_path / "D" / "MyWwise")] if name == "WWISEROOT" else [])
+    assert desktop.find_wwise({}) == exe          # also without a year in the folder name
+    assert desktop.find_wwise({"packaging": {"wwise_console": str(exe)}}) == exe

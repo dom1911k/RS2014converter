@@ -87,15 +87,12 @@ def songs_dir(cfg: dict) -> Path:
     return Path(custom) if custom else ROOT / "songs"
 
 
-def wwise_found() -> bool | None:
+def wwise_found(cfg: dict | None = None) -> bool | None:
     if sys.platform != "win32":
         return None
-    if os.environ.get("WWISEROOT"):
-        return True
-    for pf in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
-        if pf and (Path(pf) / "Audiokinetic").exists():
-            return True
-    return False
+    from rs2014conv.desktop import find_wwise
+
+    return find_wwise(cfg) is not None
 
 
 def report_checks(report: Path) -> list[str]:
@@ -132,7 +129,7 @@ class Host:
         if t == "hello":
             self.write({"type": "hello", "version": VERSION, "songsDir": str(songs_dir(self.cfg)),
                         "dlcFolder": (self.cfg.get("packaging") or {}).get("copy_to_folder") or "",
-                        "wwise": wwise_found()})
+                        "wwise": wwise_found(self.cfg)})
         elif t == "begin":
             folder = songs_dir(self.cfg) / safe_name(msg["folder"])
             folder.mkdir(parents=True, exist_ok=True)
