@@ -557,15 +557,18 @@ _SLIDES = {"shift": "shift", "legato": "legato", "outDownwards": "out_down", "ou
 
 
 def is_btchart(path: Path) -> bool:
-    """A Bass Trainer chart (the browser extension's "bass-chart" JSON)."""
-    if path.suffix.lower() != ".json":
+    """A Bass Trainer chart (the browser extension's "bass-chart" JSON).
+
+    The whole file is checked: the "format" field can be anywhere (Chrome's storage, for
+    one, sorts the keys alphabetically, which puts it after the bars).
+    """
+    if Path(path).suffix.lower() != ".json":
         return False
     try:
-        with open(path, encoding="utf-8") as f:
-            head = f.read(4096)
-    except OSError:
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
         return False
-    return '"bass-chart"' in head
+    return isinstance(data, dict) and data.get("format") == "bass-chart"
 
 
 def _read_btchart(path: Path) -> TabSong:

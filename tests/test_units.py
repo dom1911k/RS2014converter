@@ -273,6 +273,12 @@ def test_bass_trainer_chart(tmp_path):
     path = tmp_path / "Band - Test.btchart.json"
     path.write_text(json.dumps(chart), encoding="utf-8")
     assert is_btchart(path) and not is_btchart(tmp_path / "missing.json")
+    # Keys in any order (Chrome's storage sorts them: "format" ends up after "bars").
+    sorted_path = tmp_path / "sorted.btchart.json"
+    big = dict(chart, beats=[{"t": k * 0.5, "bar": k // 4, "downbeat": k % 4 == 0} for k in range(400)])
+    sorted_path.write_text(json.dumps(big, sort_keys=True, indent=1), encoding="utf-8")
+    assert sorted_path.read_text(encoding="utf-8").index('"format"') > 4096
+    assert is_btchart(sorted_path) and read_tab(sorted_path).measures[1].marker == "Verse"
 
     song = read_tab(path)
     assert (song.title, song.artist, song.tuning) == ("Test", "Band", [26, 33, 38, 43])
