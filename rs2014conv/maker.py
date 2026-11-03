@@ -162,6 +162,7 @@ class Result:
     check_mix: Path | None
     rs2dlc: Path | None = None  # the project: the .psarc can be built again from it
     packaging: str = ""         # the report's "Packaging: ..." line
+    tab: str = ""               # the report's "Tab: ..." (the tab file, or "(none - transcribed from audio)")
 
 
 def report_checks(report: Path) -> list[str]:
@@ -190,10 +191,11 @@ def latest_result(folder: Path) -> Result | None:
     psarcs = sorted(out.glob("*.psarc"), key=lambda p: p.stat().st_mtime)
     mixes = sorted((out / "review").glob("check_mix*.wav")) if (out / "review").exists() else []
     projects = sorted((out / "project").glob("*.rs2dlc")) if (out / "project").exists() else []
-    packaging = next((ln for ln in reports[-1].read_text(encoding="utf-8", errors="replace").splitlines()
-                      if ln.startswith("Packaging:")), "")
+    lines = reports[-1].read_text(encoding="utf-8", errors="replace").splitlines()
+    packaging = next((ln for ln in lines if ln.startswith("Packaging:")), "")
+    tab = next((ln[4:].strip() for ln in lines if ln.startswith("Tab:")), "")
     return Result(out, psarcs[-1] if psarcs else None, report_checks(reports[-1]), mixes[0] if mixes else None,
-                  projects[0] if projects else None, packaging)
+                  projects[0] if projects else None, packaging, tab)
 
 
 def list_songs(base: Path | None = None) -> list[tuple[Path, Song, Result | None]]:

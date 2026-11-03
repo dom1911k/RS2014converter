@@ -265,6 +265,8 @@ class App:
             self.report_btn.pack(side="left", padx=(8, 0))
             done = "✓ CDLC made" if res.psarc else ("Made everything except the .psarc. Fix what's listed below, then "
                                                     "press ⟳ Build the .psarc again (takes seconds).")
+            if res.tab:
+                done += "  ·  notes " + ("transcribed from the audio (no tab)" if res.tab.startswith("(none") else f"from the tab {Path(res.tab).name}")
             self.step_lbl.configure(text=done, style="Ok.TLabel" if res.psarc else "Warn.TLabel")
             self.checks_lbl.configure(text=("Please check:\n• " + "\n• ".join(res.checks)) if res.checks else "Nothing special to check. Still listen to the check mix once.")
         else:
@@ -328,6 +330,13 @@ class App:
         if missing:
             messagebox.showwarning("Almost", "Please give " + ", ".join(missing) + ".")
             return
+        if not s.tab and not messagebox.askyesno(
+                "No tab chosen",
+                "No bass tab is chosen, so the notes will be worked out from the audio (transcribed). "
+                "That is much less exact than a tab.\n\nFor a Songsterr song, use the Bass Trainer's RS2014 kit "
+                "(exactly the tab you see in the browser), or choose a tab file under 'Bass tab'.\n\n"
+                "Transcribe from the audio anyway?"):
+            return
         folder = maker.save_song(s)
         self.song = s
         self.refresh_songs(keep=folder)
@@ -387,7 +396,10 @@ class App:
             if res.psarc:
                 cfg = config.load(None)
                 dest = (cfg.get("packaging") or {}).get("copy_to_folder")
-                self.step_lbl.configure(text="✓ CDLC made" + (" and copied to Rocksmith: start the game!" if dest else ""), style="Ok.TLabel")
+                notes = ""
+                if res.tab:
+                    notes = "  ·  notes " + ("transcribed from the audio (no tab)" if res.tab.startswith("(none") else f"from the tab {Path(res.tab).name}")
+                self.step_lbl.configure(text="✓ CDLC made" + (" and copied to Rocksmith: start the game!" if dest else "") + notes, style="Ok.TLabel")
         else:
             self.step_lbl.configure(text="Stopped. The reason is at the end of the log.", style="Warn.TLabel")
 
