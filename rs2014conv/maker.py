@@ -45,6 +45,7 @@ class Song:
     audio: str = ""  # path (absolute, or relative to the folder)
     tab: str = ""
     tuning: str = ""  # "" = automatic
+    cover: str = ""   # "" = the album cover is looked up online
     folder: Path | None = None
     extra: dict = field(default_factory=dict)  # other song.yaml keys (chart_offset, strings...)
 
@@ -92,7 +93,7 @@ def load_song(path: Path) -> Song:
         s = Song(folder=path, title=str(data.pop("title", "") or ""), artist=str(data.pop("artist", "") or ""),
                  album=str(data.pop("album", "") or ""), year=int(data.pop("year", 0) or 0),
                  audio=str(data.pop("audio", "") or ""), tab=str(data.pop("tab", "") or ""),
-                 tuning=str(data.pop("tuning", "") or ""), extra=data)
+                 tuning=str(data.pop("tuning", "") or ""), cover=str(data.pop("cover", "") or ""), extra=data)
         if not s.audio:
             s.audio = _first(path, AUDIO_EXT, exclude=("bass", "stem", "preview"))
         if not s.tab:
@@ -139,6 +140,8 @@ def save_song(song: Song, base: Path | None = None) -> Path:
         data["tab"] = rel(song.tab)
     if song.tuning.strip():
         data["tuning"] = song.tuning.strip()
+    if song.cover.strip():
+        data["cover"] = rel(song.cover.strip())
     data.update(song.extra)
     (song.folder / "song.yaml").write_text("# Made with the RS2014 CDLC Maker\n" + yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
                                            encoding="utf-8")
@@ -163,6 +166,8 @@ class Result:
     rs2dlc: Path | None = None  # the project: the .psarc can be built again from it
     packaging: str = ""         # the report's "Packaging: ..." line
     tab: str = ""               # the report's "Tab: ..." (the tab file, or "(none - transcribed from audio)")
+    cover: Path | None = None   # the cover that went into the CDLC
+    cover_source: str = ""      # where it came from (iTunes / Deezer / your image / generated)
 
 
 def report_checks(report: Path) -> list[str]:
@@ -194,8 +199,10 @@ def latest_result(folder: Path) -> Result | None:
     lines = reports[-1].read_text(encoding="utf-8", errors="replace").splitlines()
     packaging = next((ln for ln in lines if ln.startswith("Packaging:")), "")
     tab = next((ln[4:].strip() for ln in lines if ln.startswith("Tab:")), "")
+    cover = out / "project" / "cover.png"
+    cover_source = next((ln[6:].strip() for ln in lines if ln.startswith("Cover:")), "")
     return Result(out, psarcs[-1] if psarcs else None, report_checks(reports[-1]), mixes[0] if mixes else None,
-                  projects[0] if projects else None, packaging, tab)
+                  projects[0] if projects else None, packaging, tab, cover if cover.exists() else None, cover_source)
 
 
 def list_songs(base: Path | None = None) -> list[tuple[Path, Song, Result | None]]:

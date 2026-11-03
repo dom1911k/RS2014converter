@@ -38,6 +38,7 @@ DEFAULTS: dict = {
     "sections": {"auto_detect": True, "min_bars": 8, "phrase_bars": 8},
     "check_mix": {"clicks": True, "synth_gain_db": 0.0, "split_file": True, "format": "wav"},
     "bass_trainer": {"songs_folder": ""},
+    "album_art": {"download": True},
     "packaging": {
         "enabled": True,
         "packager_path": "",

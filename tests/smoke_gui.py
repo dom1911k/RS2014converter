@@ -18,12 +18,13 @@ fake.write_text("import sys, pathlib, time\nsong = pathlib.Path(sys.argv[1]); ou
                 "(out / 'report.txt').write_text('x\\nPLEASE CHECK:\\n  * Measures 12-13: tab and recording disagree, listen at 0:41.\\n'\n"
                 "  '  * Wwise couldn\\'t convert the audio. Start Wwise once, then use Build the .psarc again.\\n\\nPackaging: FAILED - x\\n')\n"
                 "(out / 'project').mkdir(exist_ok=True); (out / 'project' / 'Band_Song.rs2dlc').write_text('{}')\n"
+                "import shutil, os; c = os.environ.get('SMOKE_COVER'); c and shutil.copy(c, out / 'project' / 'cover.png')\n"
                 "(out / 'review' / 'check_mix.wav').write_bytes(b'w')\n")
 # 'Build the .psarc again': a stand-in that makes the .psarc and updates the report.
 refake = tmp / 'fake_repack.py'
 refake.write_text("import sys, pathlib\nout = pathlib.Path(sys.argv[1]); print('== Packaging', flush=True)\n"
                   "(out / 'Band_Song_v1_p.psarc').write_bytes(b'p')\n"
-                  "(out / 'report.txt').write_text('x\\nPLEASE CHECK:\\n  * Measures 12-13: tab and recording disagree, listen at 0:41.\\n\\nPackaging: headless build - OK\\n')\n")
+                  "(out / 'report.txt').write_text('x\\nPLEASE CHECK:\\n  * Measures 12-13: tab and recording disagree, listen at 0:41.\\n\\nCover: iTunes: Lyn - Persona 5 (Original Soundtrack)\\nPackaging: headless build - OK\\n')\n")
 maker.repackage_command = lambda out: [sys.executable, str(refake), str(out)]
 maker.build_command = lambda folder: [sys.executable, str(fake), str(folder)]
 from importlib.machinery import SourceFileLoader; m = SourceFileLoader('cdlc_maker', str(ROOT / 'app' / 'cdlc_maker.pyw')).load_module()

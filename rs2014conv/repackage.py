@@ -46,9 +46,37 @@ def update_report(text: str, new: Report, psarc: Path | None = None) -> str:
         if psarc and line.startswith("  CDLC:"):
             line = f"  CDLC:        {psarc}"
         out.append(line)
+    if any(ln.startswith("Cover:") for ln in new.lines):   # a new cover replaces the old line
+        out = [ln for ln in out if not ln.startswith("Cover:")]
     while out and not out[-1].strip():
         out.pop()
     return "\n".join(out + new.lines) + "\n"
+
+
+def _maybe_cover(rs2dlc: Path, cfg: dict, rep: Report) -> None:
+    """A song that still has the generated cover gets the album cover from online, if found."""
+    import json
+
+    from . import cover
+
+    proj = rs2dlc.parent
+    source_file = proj / "cover_source.txt"
+    source = source_file.read_text(encoding="utf-8").strip() if source_file.exists() else "generated"
+    if not (cfg.get("album_art") or {}).get("download", True) or not source.startswith("generated"):
+        return
+    try:
+        p = json.loads(rs2dlc.read_text(encoding="utf-8"))
+        title, artist = p["Title"]["Value"], p["ArtistName"]["Value"]
+        album = (p.get("AlbumName") or {}).get("Value", "")
+        art = proj / (p.get("AlbumArtFile") or "cover.png")
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    print("Looking for the album cover online...", flush=True)
+    found = cover.download_cover(art, title, artist, "" if album == title else album)
+    if found:
+        source_file.write_text(found, encoding="utf-8")
+        rep.add(f"Cover: {found}")
+        print(f"Cover: {found}")
 
 
 def repackage(out_dir: Path) -> Path | None:
@@ -57,9 +85,11 @@ def repackage(out_dir: Path) -> Path | None:
     if not projects:
         print(f"No project (.rs2dlc) in {out_dir / 'project'}: make the CDLC again instead.")
         return None
-    print("== Packaging", flush=True)
     rep = Report()
-    psarc = _package(projects[0], out_dir, config.load(None), rep)
+    cfg = config.load(None)
+    _maybe_cover(projects[0], cfg, rep)
+    print("== Packaging", flush=True)
+    psarc = _package(projects[0], out_dir, cfg, rep)
     report = out_dir / "report.txt"
     if report.exists():
         report.write_text(update_report(report.read_text(encoding="utf-8"), rep, psarc), encoding="utf-8")

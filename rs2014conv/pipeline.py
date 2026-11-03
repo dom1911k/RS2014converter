@@ -419,14 +419,30 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         for old in (proj_dir / "audio.wem", proj_dir / "audio_preview.wav", proj_dir / "audio_preview.wem"):
             old.unlink(missing_ok=True)
     cover_path = proj_dir / "cover.png"
+    source_file = proj_dir / "cover_source.txt"   # where cover.png came from (kept for rebuilds)
+    source = source_file.read_text(encoding="utf-8").strip() if source_file.exists() and cover_path.exists() else ""
     if inp.cover:
         from PIL import Image
 
         from PIL import ImageOps
 
         ImageOps.fit(Image.open(inp.cover).convert("RGB"), (512, 512), Image.LANCZOS).save(cover_path)
+        source = f"your image {Path(inp.cover).name}"
+    elif (cfg.get("album_art") or {}).get("download", True) and not source.startswith(("iTunes", "Deezer")):
+        # The album cover from iTunes / Deezer (title + artist must match), else a generated one.
+        info("Looking for the album cover online...")
+        found = cover.download_cover(cover_path, inp.title, inp.artist, inp.album)
+        if found:
+            source = found
+        elif not cover_path.exists() or not source:
+            cover.make_cover(cover_path, inp.title, inp.artist)
+            source = "generated (no matching album cover found online)"
     elif not cover_path.exists():
         cover.make_cover(cover_path, inp.title, inp.artist)
+        source = "generated"
+    source_file.write_text(source, encoding="utf-8")
+    info(f"Cover: {source}")
+    report.add(f"Cover: {source}")
 
     chorus = next((s.time for s in chart.sections if s.name == "chorus"), None)
     preview_start = chorus if chorus is not None else chart.song_length / 2 - 14

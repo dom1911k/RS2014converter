@@ -78,3 +78,8 @@ bass_trainer:
   # Where songs sent from the Bass Trainer browser extension ("Build CDLC") are saved,
   # one folder per song. Empty = the "songs" folder inside this tool's folder.
   songs_folder: ''
+
+album_art:
+  # Without a cover image of your own, look up the album cover online (iTunes, then Deezer;
+  # title and artist must match, otherwise a simple cover with the title is made).
+  download: true

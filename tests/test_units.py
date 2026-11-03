@@ -521,3 +521,24 @@ def test_find_wwise_outside_the_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(desktop, "_registry_env", lambda name: [str(tmp_path / "D" / "MyWwise")] if name == "WWISEROOT" else [])
     assert desktop.find_wwise({}) == exe          # also without a year in the folder name
     assert desktop.find_wwise({"packaging": {"wwise_console": str(exe)}}) == exe
+
+
+def test_album_cover_matching():
+    """Online album art: the right title and artist, the original rather than covers/live/compilations."""
+    from rs2014conv.cover import MIN_SCORE, score_match
+
+    s = lambda *r: score_match("Hoshi to Bokura to", "Persona 5", "", *r)  # noqa: E731
+    official = s("Hoshi To Bokura To", "Lyn", "Persona 5 (Original Soundtrack)")
+    assert official >= MIN_SCORE
+    assert s("Hoshi to Bokura To", "Lyn", "Persona 5: Dancing in Starlight (Soundtrack)") >= MIN_SCORE
+    assert s("Hoshi To Bokura To (Piano Version)", "Lyn", "Persona 5 (Original Soundtrack)") < official
+    assert s("Hoshi to Bokura to", "TPR", "Midnight Mementos: Melancholy Music From Persona 5") == 0   # someone else's album
+    assert s("Hoshi to Bokura to", "Merkeyz", "Persona 5 Royal Lofi") < MIN_SCORE
+    assert s("Beneath the Mask", "Lyn", "Persona 5 (Original Soundtrack)") == 0                        # another song
+    m = lambda t, a, rt, ra, ral: score_match(t, a, "", rt, ra, ral)  # noqa: E731
+    assert m("Money", "Pink Floyd", "Money", "Celtic Pink Floyd", "Celtic Pink Floyd") == 0           # a tribute act
+    assert m("Killing in the Name", "Rage Against the Machine", "Killing in the Name", "Rage Against Power Machines", "Parade") == 0
+    assert m("Money", "Pink Floyd", "Money", "Pink Floyd", "The Dark Side of the Moon") == 1.0
+    assert m("21 Guns", "Green Day", "21 Guns", "Green Day", "21 Guns - Single") > \
+        m("21 Guns", "Green Day", "21 Guns", "Green Day", "Transformers: Revenge of the Fallen (Soundtrack)")
+    assert m("Hoshi to Bokura to", "Lyn", "Hoshi to Bokura to", "PERSONA 5 Special Big Band & Lyn", "Big Band Concert 2025") < 1.0

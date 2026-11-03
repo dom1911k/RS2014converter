@@ -125,16 +125,18 @@ class App:
             e = ttk.Entry(form, width=48)
             e.grid(row=r, column=1, columnspan=2, sticky="we", pady=3, padx=(8, 0))
             self.fields[key] = e
-        for r, (key, label, cmd) in enumerate([("audio", "Audio", self.pick_audio), ("tab", "Bass tab (optional)", self.pick_tab)], start=4):
+        for r, (key, label, cmd) in enumerate([("audio", "Audio", self.pick_audio), ("tab", "Bass tab (optional)", self.pick_tab),
+                                               ("cover", "Cover (optional)", self.pick_cover)], start=4):
             ttk.Label(form, text=label, style="Panel.TLabel").grid(row=r, column=0, sticky="w", pady=3)
             e = ttk.Entry(form, width=48)
             e.grid(row=r, column=1, sticky="we", pady=3, padx=(8, 6))
             ttk.Button(form, text="Choose…", command=cmd).grid(row=r, column=2, sticky="e")
             self.fields[key] = e
-        ttk.Label(form, text="Tuning", style="Panel.TLabel").grid(row=6, column=0, sticky="w", pady=3)
+        ttk.Label(form, text="empty = the album cover is looked up online (or a simple one is made)", style="Muted.TLabel").grid(row=7, column=1, columnspan=2, sticky="w", padx=(8, 0))
+        ttk.Label(form, text="Tuning", style="Panel.TLabel").grid(row=8, column=0, sticky="w", pady=3)
         self.tuning = ttk.Combobox(form, width=20, values=["(automatic)", "E Standard", "Drop D", "Eb Standard", "D Standard",
                                                           "Drop C", "C Standard", "B E A D G"])
-        self.tuning.grid(row=6, column=1, sticky="w", pady=3, padx=(8, 0))
+        self.tuning.grid(row=8, column=1, sticky="w", pady=3, padx=(8, 0))
         self.tuning.set("(automatic)")
         form.columnconfigure(1, weight=1)
         ttk.Label(right, text="Without a tab the bass is separated from the song and transcribed. With a tab "
@@ -155,7 +157,12 @@ class App:
         self.progress = ttk.Progressbar(right, mode="indeterminate")
         self.step_lbl = ttk.Label(right, text="", style="Panel.TLabel")
         self.step_lbl.pack(anchor="w", pady=(10, 2))
-        self.checks_lbl = ttk.Label(right, text="", style="Warn.TLabel", wraplength=600, justify="left")
+        info = ttk.Frame(right, style="Panel.TFrame")
+        info.pack(fill="x")
+        self.cover_lbl = tk.Label(info, bg=PANEL, borderwidth=0)   # the cover in the CDLC (thumbnail)
+        self.cover_lbl.pack(side="right", padx=(10, 0))
+        self.cover_img = None
+        self.checks_lbl = ttk.Label(info, text="", style="Warn.TLabel", wraplength=520, justify="left")
         self.checks_lbl.pack(anchor="w")
         self.log = tk.Text(right, height=8, bg="#0e1014", fg="#aeb5c4", insertbackground=TEXT, borderwidth=0,
                            font=("Consolas", 9), wrap="word")
@@ -246,7 +253,7 @@ class App:
         self.fields["year"].delete(0, "end")
         if song.year:
             self.fields["year"].insert(0, str(song.year))
-        for k in ("audio", "tab"):
+        for k in ("audio", "tab", "cover"):
             self.fields[k].delete(0, "end")
             p = song.path(getattr(song, k))
             self.fields[k].insert(0, str(p) if p else "")
@@ -258,10 +265,11 @@ class App:
 
     def show_result(self, res: maker.Result | None):
         self.result = res
+        self.show_cover(res)
         for b in (self.out_btn, self.mix_btn, self.report_btn, self.repack_btn):
             b.pack_forget()
         if res:
-            if not res.psarc and res.rs2dlc:
+            if res.rs2dlc:   # also for a finished song: e.g. to get the album cover without a full rebuild
                 self.repack_btn.pack(side="left", padx=(0, 8))
             self.out_btn.pack(side="left")
             if res.check_mix:
@@ -272,7 +280,10 @@ class App:
             if res.tab:
                 done += "  ·  notes " + ("transcribed from the audio (no tab)" if res.tab.startswith("(none") else f"from the tab {Path(res.tab).name}")
             self.step_lbl.configure(text=done, style="Ok.TLabel" if res.psarc else "Warn.TLabel")
-            self.checks_lbl.configure(text=("Please check:\n• " + "\n• ".join(res.checks)) if res.checks else "Nothing special to check. Still listen to the check mix once.")
+            text = ("Please check:\n• " + "\n• ".join(res.checks)) if res.checks else "Nothing special to check. Still listen to the check mix once."
+            if res.cover_source:
+                text += f"\n\nCover: {res.cover_source}"
+            self.checks_lbl.configure(text=text)
         else:
             self.step_lbl.configure(text="", style="Panel.TLabel")
             self.checks_lbl.configure(text="")
@@ -309,6 +320,28 @@ class App:
                 if a and not self.fields["artist"].get():
                     self.fields["artist"].insert(0, a)
 
+    def pick_cover(self):
+        f = filedialog.askopenfilename(title="Cover image (optional)", filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp *.webp"), ("All files", "*.*")])
+        if f:
+            self.fields["cover"].delete(0, "end")
+            self.fields["cover"].insert(0, f)
+
+    def show_cover(self, res):
+        self.cover_img = None
+        if res and res.cover:
+            try:
+                import base64
+                from io import BytesIO
+
+                from PIL import Image
+
+                buf = BytesIO()
+                Image.open(res.cover).convert("RGB").resize((96, 96)).save(buf, "PNG")
+                self.cover_img = tk.PhotoImage(data=base64.b64encode(buf.getvalue()))   # Tk shows PNG itself
+            except Exception:  # noqa: BLE001 - the preview is optional
+                self.cover_img = None
+        self.cover_lbl.configure(image=self.cover_img or "")
+
     def pick_tab(self):
         f = filedialog.askopenfilename(title="Bass tab (optional)", filetypes=TAB_TYPES)
         if f:
@@ -322,6 +355,7 @@ class App:
         y = self.fields["year"].get().strip()
         s.year = int(y) if y.isdigit() else 0
         s.audio, s.tab = self.fields["audio"].get().strip(), self.fields["tab"].get().strip()
+        s.cover = self.fields["cover"].get().strip()
         t = self.tuning.get().strip()
         s.tuning = "" if t.startswith("(") else t
         return s

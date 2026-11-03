@@ -109,6 +109,13 @@ Open **RS2014 CDLC Maker** (desktop or Start menu):
    **▶ Listen to the check mix** plays the song with the chart, and the CDLC is already in
    Rocksmith (if your `dlc` folder was found).
 
+**Album cover:** if you don't choose a cover image, the album cover is looked up online (iTunes,
+then Deezer; title and artist must match, the original album is preferred over live versions,
+covers and compilations). If nothing fits, or you're offline, a simple cover with the title is
+made. The result shows the cover and where it came from. For a song you made before, click it
+and press **⟳ Build the .psarc again**: it fetches the cover and repackages in seconds.
+(`album_art: download: false` in `settings.yaml` turns this off.)
+
 Songs from the Bass Trainer extension (its **Build CDLC** button) appear in **Your songs** too:
 click one to rebuild it, open its output or listen again. You can also drop an audio file or a
 song folder onto the desktop shortcut.
