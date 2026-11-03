@@ -1,22 +1,29 @@
-# make_cdlc one-time setup for Windows 10/11. Started by setup.bat; safe to run again.
+# make_cdlc one-time setup for Windows 10/11. Started by setup.bat or install.ps1; safe to run again.
+# No admin rights needed: everything goes into this folder or your user account.
 #
 # Installs (only what is missing):
-#   1. Python 3.12            (winget)
+#   1. Python 3.12            (for your user: winget, or the python.org installer)
 #   2. A private Python environment in .venv with PyTorch (CUDA) + the audio libraries
 #   3. The AI models (downloaded once, then everything works offline)
 #   4. Rocksmith2014.NET source (the library behind DLC Builder)
-#   5. The .NET 10 SDK        (winget) and builds the packager (packager\publish\RsPackager.exe)
-# and checks for Wwise, which you install yourself (see README).
-# Finally it connects the converter to the Bass Trainer browser extension (one-click "Build CDLC").
+#   5. The .NET 10 SDK (into runtime\dotnet if you don't have it) and builds the packager
+#      (packager\publish\RsPackager.exe, self-contained: no .NET needed to run it)
+# then checks for Wwise, which you install yourself (one-time, with a free account),
+# connects the converter to the Bass Trainer browser extension (one-click "Build CDLC"),
+# finds your Rocksmith dlc folder and adds the "RS2014 CDLC Maker" shortcuts.
+
+param([switch]$Unattended)
 
 # "Continue": native tools (pip, py, dotnet) write progress to stderr, which must not abort the
 # script in Windows PowerShell 5.1. Every step checks $LASTEXITCODE instead.
 $ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is very slow with the progress bar
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 $RsNetCommit = "4cf3325174e13f1dc5ce997e7663b2851c6afcce"
 $TorchVersion = "2.11.0"
 $TorchAudioVersion = "2.11.0"
+$PythonInstallerUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 
 function Step($text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
 function Ok($text) { Write-Host "   OK: $text" -ForegroundColor Green }
@@ -31,29 +38,44 @@ function Refresh-Path {
 
 function Has-Winget { return [bool](Get-Command winget -ErrorAction SilentlyContinue) }
 
-# ---------------------------------------------------------------- 1. Python
-Step "1/7 Python 3.12"
-$py = $null
-if (Get-Command py -ErrorAction SilentlyContinue) {
-    & py -3.12 -c "import sys" 2>$null
-    if ($LASTEXITCODE -eq 0) { $py = @("py", "-3.12") }
+function Find-Python312 {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        & py -3.12 -c "import sys" 2>$null
+        if ($LASTEXITCODE -eq 0) { return @("py", "-3.12") }
+    }
+    $local = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+    if (Test-Path $local) { return @($local) }
+    return $null
 }
+
+# ---------------------------------------------------------------- 1. Python
+Step "1/8 Python 3.12"
+$py = Find-Python312
 if (-not $py) {
-    if (-not (Has-Winget)) { Fail "Python 3.12 not found and winget is missing. Install Python 3.12 from python.org, then run setup.bat again." }
-    Write-Host "   Installing Python 3.12 with winget..."
-    winget install -e --id Python.Python.3.12 --accept-package-agreements --accept-source-agreements
-    Refresh-Path
-    & py -3.12 -c "import sys" 2>$null
-    if ($LASTEXITCODE -ne 0) { Fail "Python was installed but is not found yet. Close this window and run setup.bat again." }
-    $py = @("py", "-3.12")
+    if (Has-Winget) {
+        Write-Host "   Installing Python 3.12 for your user (winget)..."
+        winget install -e --id Python.Python.3.12 --scope user --silent --accept-package-agreements --accept-source-agreements
+        Refresh-Path
+        $py = Find-Python312
+    }
+    if (-not $py) {
+        Write-Host "   Installing Python 3.12 for your user (python.org)..."
+        $exe = Join-Path $env:TEMP "python-3.12-installer.exe"
+        Invoke-WebRequest $PythonInstallerUrl -OutFile $exe -UseBasicParsing
+        Start-Process $exe -ArgumentList "/quiet InstallAllUsers=0 Include_launcher=1 Include_test=0 Include_tcltk=1 PrependPath=0" -Wait
+        Remove-Item $exe -ErrorAction SilentlyContinue
+        Refresh-Path
+        $py = Find-Python312
+    }
+    if (-not $py) { Fail "Python 3.12 could not be installed. Install it from python.org (for your user), then run setup again." }
 }
 Ok "Python 3.12"
 
 # ---------------------------------------------------------------- 2. venv + packages
-Step "2/7 Python packages (this downloads a few GB the first time)"
+Step "2/8 Python packages (this downloads a few GB the first time)"
 $venvPy = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPy)) {
-    & $py[0] $py[1] -m venv (Join-Path $Root ".venv")
+    if ($py.Count -gt 1) { & $py[0] $py[1] -m venv (Join-Path $Root ".venv") } else { & $py[0] -m venv (Join-Path $Root ".venv") }
     if ($LASTEXITCODE -ne 0) { Fail "Could not create the Python environment." }
 }
 & $venvPy -m pip install --upgrade pip --quiet
@@ -73,12 +95,12 @@ if ($LASTEXITCODE -ne 0) { Fail "Installing the Python packages failed (see the 
 Ok "Python packages"
 
 # ---------------------------------------------------------------- 3. models
-Step "3/7 AI models (downloaded once)"
+Step "3/8 AI models (downloaded once)"
 & $venvPy -m rs2014conv.download_models
-if ($LASTEXITCODE -ne 0) { Warn "Some models could not be downloaded. You can run setup.bat again later." } else { Ok "models" }
+if ($LASTEXITCODE -ne 0) { Warn "Some models could not be downloaded. You can run setup again later." } else { Ok "models" }
 
 # ---------------------------------------------------------------- 4. Rocksmith2014.NET
-Step "4/7 Rocksmith2014.NET (DLC Builder's library)"
+Step "4/8 Rocksmith2014.NET (DLC Builder's library)"
 $rsnet = Join-Path $Root "third_party\Rocksmith2014.NET"
 if (-not (Test-Path (Join-Path $rsnet "src\Rocksmith2014.DLCProject"))) {
     if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $Root ".git"))) {
@@ -100,52 +122,61 @@ if (-not (Test-Path (Join-Path $rsnet "src\Rocksmith2014.DLCProject"))) {
 Ok "Rocksmith2014.NET"
 
 # ---------------------------------------------------------------- 5. .NET SDK + packager
-Step "5/7 .NET 10 SDK and the packager"
+Step "5/8 .NET 10 SDK and the packager"
 Refresh-Path
-$hasSdk = $false
+$dotnet = $null
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
     $sdks = & dotnet --list-sdks 2>$null
-    if ($sdks -match "^10\.") { $hasSdk = $true }
+    if ($sdks -match "^10\.") { $dotnet = "dotnet" }
 }
-if (-not $hasSdk) {
-    if (-not (Has-Winget)) { Fail ".NET 10 SDK missing and winget not available. Install the .NET 10 SDK from https://dotnet.microsoft.com/download and run setup.bat again." }
-    Write-Host "   Installing the .NET 10 SDK with winget..."
-    winget install -e --id Microsoft.DotNet.SDK.10 --accept-package-agreements --accept-source-agreements
-    Refresh-Path
+$localDotnet = Join-Path $Root "runtime\dotnet\dotnet.exe"
+if (-not $dotnet -and (Test-Path $localDotnet)) { $dotnet = $localDotnet }
+if (-not $dotnet) {
+    # Into this folder (no admin rights, nothing changed on the system).
+    Write-Host "   Installing the .NET 10 SDK into runtime\dotnet..."
+    $installer = Join-Path $env:TEMP "dotnet-install.ps1"
+    Invoke-WebRequest "https://dot.net/v1/dotnet-install.ps1" -OutFile $installer -UseBasicParsing
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Channel 10.0 -InstallDir (Join-Path $Root "runtime\dotnet") -NoPath
+    Remove-Item $installer -ErrorAction SilentlyContinue
+    if (-not (Test-Path $localDotnet)) { Fail "The .NET 10 SDK could not be installed (see the messages above)." }
+    $dotnet = $localDotnet
 }
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
-& dotnet publish (Join-Path $Root "packager\RsPackager.fsproj") -c Release -r win-x64 --self-contained false -o (Join-Path $Root "packager\publish")
-if ($LASTEXITCODE -ne 0) { Fail "Building the packager failed (see the messages above)." }
+$env:DOTNET_NOLOGO = "1"
+$packagerExe = Join-Path $Root "packager\publish\RsPackager.exe"
+# Only (re)build when the packager's sources are newer than the built one (updates stay quick).
+$sources = Get-ChildItem (Join-Path $Root "packager") -File | Where-Object { $_.Extension -in ".fs", ".fsproj", ".props", ".config" }
+$upToDate = (Test-Path $packagerExe) -and -not ($sources | Where-Object { $_.LastWriteTime -gt (Get-Item $packagerExe).LastWriteTime })
+if (-not $upToDate) {
+    & $dotnet publish (Join-Path $Root "packager\RsPackager.fsproj") -c Release -r win-x64 --self-contained true -o (Join-Path $Root "packager\publish")
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $packagerExe) { Warn "Rebuilding the packager failed; the existing one is kept." }
+        else { Fail "Building the packager failed (see the messages above)." }
+    }
+}
 Ok "packager\publish\RsPackager.exe"
 
 # ---------------------------------------------------------------- 6. Wwise
-Step "6/7 Wwise (needed to convert the audio for Rocksmith)"
-$wwise = @()
-foreach ($pf in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
-    if ($pf -and (Test-Path (Join-Path $pf "Audiokinetic"))) {
-        $wwise += Get-ChildItem (Join-Path $pf "Audiokinetic") -Directory | Where-Object { $_.Name -match "2019|2021|2022|2023" }
-    }
-}
-if ($env:WWISEROOT) { Write-Host "   WWISEROOT = $env:WWISEROOT" }
-if ($wwise.Count -gt 0) {
-    Ok ("found " + (($wwise | ForEach-Object { $_.Name }) -join ", "))
+Step "6/8 Wwise (needed to convert the audio for Rocksmith)"
+& $venvPy -c "from rs2014conv.desktop import find_wwise; p = find_wwise(); print('   ' + str(p) if p else ''); raise SystemExit(0 if p else 3)"
+if ($LASTEXITCODE -eq 0) {
+    Ok "Wwise found"
 } else {
-    Warn "Wwise 2023 was not found. Install it with the Audiokinetic Launcher (see README, section 'Wwise')."
-    Warn "Without Wwise, make_cdlc still makes everything except the final .psarc."
-}
-
-$dlc = Join-Path ${env:ProgramFiles(x86)} "Steam\steamapps\common\Rocksmith2014\dlc"
-if (Test-Path $dlc) {
-    Write-Host ""
-    Write-Host "   Your Rocksmith dlc folder: $dlc"
-    Write-Host "   Tip: set packaging -> copy_to_folder in config.yaml to this path to install CDLC automatically."
+    Warn "Wwise 2023 is not installed yet. It is free, but needs an Audiokinetic account, so you install it yourself (once):"
+    Write-Host "     1. On the page that opens, create a free account and download the Audiokinetic Launcher."
+    Write-Host "     2. In the Launcher: Wwise tab -> Install a new version -> the newest 2023.1.x (not 2024/2025)."
+    Write-Host "     3. Tick only 'Authoring' under Packages, then Install."
+    Write-Host "     4. Start Wwise once (Launcher -> Wwise 2023 -> Launch) and close it again."
+    Write-Host "   You don't need to run this setup again afterwards: the CDLC Maker finds Wwise by itself."
+    Write-Host "   Until then everything works except the final .psarc."
+    if (-not $Unattended) { Start-Process "https://www.audiokinetic.com/download/" }
 }
 
 # ---------------------------------------------------------------- 7. Bass Trainer link
 # Registers native_host\bass_trainer_host.bat with Chrome (and Edge / Brave) as a "native
 # messaging host", so the Bass Trainer extension's player can hand a song to this tool.
 # Only that extension (fixed ID) may start it. Per user (HKCU), no admin rights needed.
-Step "7/7 Connect to the Bass Trainer browser extension"
+Step "7/8 Connect to the Bass Trainer browser extension"
 $hostName = "com.basstrainer.rs2014converter"
 $extensionId = "gbbniikkcomblgdcdmbcanlcilmaeohh"
 $hostBat = Join-Path $Root "native_host\bass_trainer_host.bat"
@@ -165,6 +196,32 @@ foreach ($browserKey in @("Software\Google\Chrome", "Software\Microsoft\Edge", "
     Set-ItemProperty -Path $key -Name "(default)" -Value $hostJson
 }
 Ok "Bass Trainer can now build CDLC with one click (reload the Bass Trainer extension / its player page)."
+
+# ---------------------------------------------------------------- 8. Rocksmith folder + shortcuts
+Step "8/8 Rocksmith dlc folder and shortcuts"
+& $venvPy -m rs2014conv.desktop setup
+New-Item -ItemType Directory -Force (Join-Path $Root "songs") | Out-Null
+$pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
+$app = Join-Path $Root "app\cdlc_maker.pyw"
+$icon = Join-Path $Root "app\icon.ico"
+$shell = New-Object -ComObject WScript.Shell
+function Make-Shortcut($path, $target, $arguments, $description) {
+    $s = $shell.CreateShortcut($path)
+    $s.TargetPath = $target
+    $s.Arguments = $arguments
+    $s.WorkingDirectory = $Root
+    $s.Description = $description
+    if (Test-Path $icon) { $s.IconLocation = $icon }
+    $s.Save()
+}
+$menu = Join-Path ([Environment]::GetFolderPath("Programs")) "RS2014converter"
+New-Item -ItemType Directory -Force $menu | Out-Null
+$desktop = [Environment]::GetFolderPath("Desktop")
+Make-Shortcut (Join-Path $desktop "RS2014 CDLC Maker.lnk") $pythonw "`"$app`"" "Make Rocksmith 2014 bass CDLC (drop an audio file or song folder on it)"
+Make-Shortcut (Join-Path $menu "RS2014 CDLC Maker.lnk") $pythonw "`"$app`"" "Make Rocksmith 2014 bass CDLC"
+Make-Shortcut (Join-Path $menu "Update RS2014converter.lnk") "powershell.exe" "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $Root 'install.ps1')`" -Update" "Get the newest version"
+Make-Shortcut (Join-Path $menu "Songs folder.lnk") (Join-Path $Root "songs") "" "Songs made with the CDLC Maker and the Bass Trainer extension"
+Ok "Desktop and Start menu: 'RS2014 CDLC Maker'"
 
 Write-Host ""
 Write-Host "Setup finished." -ForegroundColor Green

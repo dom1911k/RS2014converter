@@ -4,9 +4,9 @@ Give it a song's audio file and, if you have one, a bass tab. You get back a fin
 Rocksmith 2014 Remastered bass CDLC (`.psarc`) plus files to check and fix the chart.
 Everything runs locally on your PC. After the one-time setup no internet is needed.
 
-```
-make_cdlc.bat "Song.flac" --title "Song" --artist "Band" --tab "Song.gp5"
-```
+**Install:** press Win+R, paste the line from [1a](#1a-install-the-tool), Enter. Then use the
+**RS2014 CDLC Maker** on your desktop: choose the audio (and a tab if you have one), press
+**Make CDLC**, play it in Rocksmith.
 
 * **With a tab** (best): the notes, rhythms and fingerings come from the tab. The tab is lined
   up with the recording beat by beat. This handles count-ins, repeats, a tempo that drifts,
@@ -20,13 +20,31 @@ make_cdlc.bat "Song.flac" --title "Song" --artist "Band" --tab "Song.gp5"
 
 ---
 
-## 1. One-time setup
+## 1. Install (once)
 
-You need: Windows 10/11, ~15 GB free disk space, internet during setup.
+You need: Windows 10/11, ~15 GB free disk space, internet during the installation.
+No admin rights are needed; nothing is installed for other users.
 
-### 1a. Install Wwise 2023 (for the audio conversion)
+### 1a. Install the tool
 
-Rocksmith needs its audio in Audiokinetic's `.wem` format, and only Wwise can make it. Wwise is free.
+Press **Win+R**, paste this line and press **Enter**:
+
+```
+powershell -NoExit -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/dom1911k/RS2014converter/refs/heads/claude/elegant-brown-1ku0ek/install.ps1 | iex"
+```
+
+A window opens and does everything (10–30 minutes the first time, a few GB of downloads):
+it puts the tool in `%LOCALAPPDATA%\RS2014converter`, installs Python and the AI models,
+builds the packager, finds your Rocksmith 2014 `dlc` folder (in any Steam library) so finished
+CDLC go straight into the game, connects to the [Bass Trainer](https://github.com/dom1911k/SngstrrXRcksmth)
+browser extension, and adds **RS2014 CDLC Maker** to your desktop and Start menu. At the end
+the CDLC Maker opens. If something stops it (e.g. the internet dropped), run the same line
+again: it continues where it stopped.
+
+### 1b. Install Wwise 2023 (for the audio conversion)
+
+Rocksmith needs its audio in Audiokinetic's `.wem` format, and only Wwise can make it. Wwise is
+free but needs an account, so this step is yours. The installer opens the page for you:
 
 1. Go to <https://www.audiokinetic.com/download/>, create a free account and install the
    **Audiokinetic Launcher**.
@@ -37,48 +55,65 @@ Rocksmith needs its audio in Audiokinetic's `.wem` format, and only Wwise can ma
 4. When it's installed, **start Wwise once** (Launcher → Wwise 2023 → Launch) and close it again.
    The conversion may not work until you have done this once.
 
-### 1b. Get this tool
+You don't need to run anything again afterwards: the CDLC Maker finds Wwise by itself.
 
-Either download it with git, if you have git:
+### 1c. Updating
 
-```
-git clone --recursive https://github.com/dom1911k/RS2014converter.git
-```
+Click **Check for updates** in the CDLC Maker (it tells you when there is one), or use
+**Update RS2014converter** in the Start menu. Your settings, songs and the installed parts are kept.
 
-or on GitHub click **Code → Download ZIP** and unzip it somewhere, e.g. `C:\make_cdlc`.
-Avoid folders that need admin rights, such as `C:\Program Files`.
+### Your settings
 
-### 1c. Run setup
-
-Double-click **`setup.bat`**. It installs only what is missing:
-
-| What | Why |
-|---|---|
-| Python 3.12 | runs the tool |
-| a private Python environment (`.venv` folder) with PyTorch for your GPU | the AI models (Demucs, Beat This!, CREPE) |
-| the AI models (downloaded once) | so it works offline afterwards |
-| Rocksmith2014.NET source (DLC Builder's library) | to build the `.psarc` |
-| .NET 10 SDK, then it builds `packager\publish\RsPackager.exe` | the headless packager |
-| the link to the Bass Trainer browser extension (Chrome, Edge, Brave) | one-click **Build CDLC** from the extension |
-
-It takes 10–30 minutes the first time and needs a few GB of downloads. You can run `setup.bat`
-again at any time; it only repairs or updates what's needed. At the end it tells you if Wwise was found.
-
-### 1d. (Optional) Install CDLC automatically
-
-Open `config.yaml` in Notepad and set your Rocksmith `dlc` folder:
+The CDLC Maker changes the Rocksmith `dlc` folder for you (**Change…** at the bottom). Everything
+else is in `config.yaml` (with a comment per setting); put the ones you change into
+`settings.yaml` in the same folder (same layout), which updates never touch:
 
 ```yaml
 packaging:
-  copy_to_folder: 'C:\Program Files (x86)\Steam\steamapps\common\Rocksmith2014\dlc'
+  copy_to_folder: 'D:\SteamLibrary\steamapps\common\Rocksmith2014\dlc'
+transcription:
+  onset_sensitivity: 0.7
 ```
 
-Then every finished `.psarc` is copied there, so you only need to start Rocksmith.
-Use single quotes around the path.
+### Other ways to install
+
+With git: `git clone --recursive https://github.com/dom1911k/RS2014converter.git`, or on GitHub
+**Code → Download ZIP** and unzip it (not under `C:\Program Files`). Then double-click
+**`setup.bat`**. It installs only what is missing:
+
+| What | Why |
+|---|---|
+| Python 3.12 (for your user) | runs the tool |
+| a private Python environment (`.venv` folder) with PyTorch for your GPU | the AI models (Demucs, Beat This!, CREPE) |
+| the AI models (downloaded once) | so it works offline afterwards |
+| Rocksmith2014.NET source (DLC Builder's library) | to build the `.psarc` |
+| the .NET 10 SDK (into `runtime\dotnet` if you don't have it), then it builds `packager\publish\RsPackager.exe` (self-contained) | the headless packager |
+| the link to the Bass Trainer browser extension (Chrome, Edge, Brave) | one-click **Build CDLC** from the extension |
+| your Rocksmith `dlc` folder, the app icon and the shortcuts | finished CDLC go into the game; **RS2014 CDLC Maker** |
+
+You can run `setup.bat` (or the installer) again at any time; it only repairs or updates what's needed.
 
 ---
 
 ## 2. Making a CDLC
+
+### The easy way: the RS2014 CDLC Maker
+
+Open **RS2014 CDLC Maker** (desktop or Start menu):
+
+1. **+ New song (choose audio)…**: pick the song's audio file. Title and artist are taken from a
+   file name like `Artist - Title.flac`; correct them if needed.
+2. Optionally **Bass tab**: a Guitar Pro file or a Bass Trainer chart. Without a tab the bass is
+   transcribed from the audio.
+3. **⚡ Make CDLC**. You see the progress; at the end **Please check** lists what to listen to,
+   **▶ Listen to the check mix** plays the song with the chart, and the CDLC is already in
+   Rocksmith (if your `dlc` folder was found).
+
+Songs from the Bass Trainer extension (its **Build CDLC** button) appear in **Your songs** too:
+click one to rebuild it, open its output or listen again. You can also drop an audio file or a
+song folder onto the desktop shortcut.
+
+### From the command line
 
 Open a terminal in the tool's folder: in Explorer, click the address bar, type `cmd` and press Enter.
 
@@ -127,9 +162,9 @@ tab you have open on Songsterr into a CDLC:
    by ear (nudge if needed).
 4. **Build CDLC**: the song is saved in this tool's `songs` folder and built; you see the
    progress and the report's "please check" points in the browser. With `copy_to_folder` set
-   (section 1d) the `.psarc` goes straight into Rocksmith.
+   (the CDLC Maker sets it for you) the `.psarc` goes straight into Rocksmith.
 
-The Build button appears after `setup.bat` has run once (it connects this tool to Chrome, Edge
+The Build button appears once the tool is installed (the installer connects it to Chrome, Edge
 and Brave; reload the extension afterwards). Without it, use **Download kit (ZIP)** in the card:
 unzip it and drag the folder onto **`drop_song_folder_here.bat`**.
 

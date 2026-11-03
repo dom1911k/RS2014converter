@@ -376,3 +376,60 @@ def test_bass_trainer_host(tmp_path):
     host.handle({"type": "chunk", "data": base64.b64encode(b"abc").decode()})
     with pytest.raises(ValueError):
         host.handle({"type": "end"})
+
+
+def test_desktop_and_maker(tmp_path, monkeypatch):
+    """Installer helpers (Steam libraries, dlc folder, icon, your settings) and the CDLC Maker's logic."""
+    import yaml
+
+    from rs2014conv import config, desktop, maker
+
+    # Steam: the dlc folder is found in a second library listed in libraryfolders.vdf.
+    steam, lib2 = tmp_path / "Steam", tmp_path / "Games" / "SteamLibrary"
+    (steam / "steamapps").mkdir(parents=True)
+    (steam / "steamapps" / "libraryfolders.vdf").write_text(
+        '"libraryfolders"\n{\n "0"\n {\n  "path"  "%s"\n }\n "1"\n {\n  "path"  "%s"\n }\n}\n'
+        % (str(steam).replace("\\", "\\\\"), str(lib2).replace("\\", "\\\\")), encoding="utf-8")
+    assert desktop.find_rocksmith_dlc([steam]) is None
+    dlc = lib2 / "steamapps" / "common" / "Rocksmith2014" / "dlc"
+    dlc.mkdir(parents=True)
+    assert desktop.find_rocksmith_dlc([steam]) == dlc
+    assert desktop.make_icon(tmp_path / "icon.ico").stat().st_size > 1000
+
+    # Your settings: a separate file, read after config.yaml, kept by updates.
+    monkeypatch.setattr(config, "USER_SETTINGS", tmp_path / "settings.yaml")
+    config.save_user_setting("packaging", "copy_to_folder", str(dlc))
+    assert config.load(None)["packaging"]["copy_to_folder"] == str(dlc)
+    assert yaml.safe_load((tmp_path / "settings.yaml").read_text(encoding="utf-8"))["packaging"]["copy_to_folder"] == str(dlc)
+
+    # A song from a dropped audio file -> saved as a song folder -> loaded again.
+    audio = tmp_path / "Muse - Hysteria.flac"
+    audio.write_bytes(b"fLaC")
+    s = maker.load_song(audio)
+    assert (s.artist, s.title) == ("Muse", "Hysteria") and s.missing() == []
+    folder = maker.save_song(s, base=tmp_path / "songs")
+    assert folder.name == "Muse - Hysteria"
+    again = maker.load_song(folder)
+    assert (again.title, again.artist, again.path(again.audio)) == ("Hysteria", "Muse", audio)
+    # A kit folder from the Bass Trainer extension: audio and chart inside, extra keys kept.
+    kit = tmp_path / "songs" / "Band - Song"
+    kit.mkdir()
+    (kit / "song.yaml").write_text('title: "Song"\nartist: "Band"\ntab: "Band - Song.btchart.json"\n'
+                                   'audio: "song.wav"\nchart_offset: 2.371\n', encoding="utf-8")
+    (kit / "Band - Song.btchart.json").write_text('{"format": "bass-chart"}', encoding="utf-8")
+    (kit / "song.wav").write_bytes(b"RIFF")
+    k = maker.load_song(kit)
+    assert k.extra == {"chart_offset": 2.371} and k.missing() == []
+    maker.save_song(k)
+    assert "chart_offset: 2.371" in (kit / "song.yaml").read_text(encoding="utf-8")
+    # Results: newest output folder, the report's checks, the check mix.
+    out = kit / "output" / "Band - Song"
+    (out / "review").mkdir(parents=True)
+    (out / "report.txt").write_text("x\nPLEASE CHECK:\n  * Listen at 1:02.\n  * Tuning guessed.\n\nmore\n", encoding="utf-8")
+    (out / "Band_Song_v1_p.psarc").write_bytes(b"p")
+    (out / "review" / "check_mix.wav").write_bytes(b"w")
+    r = maker.latest_result(kit)
+    assert r.checks == ["Listen at 1:02.", "Tuning guessed."] and r.psarc.name == "Band_Song_v1_p.psarc" and r.check_mix
+    names = [s.title for _, s, _ in maker.list_songs(tmp_path / "songs")]
+    assert set(names) == {"Song", "Hysteria"}
+    assert maker.Song(title="T", artist="A", audio=str(tmp_path / "gone.mp3")).missing() == ["the audio file"]

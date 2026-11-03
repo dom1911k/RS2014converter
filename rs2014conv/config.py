@@ -1,4 +1,5 @@
-"""Settings: config.yaml (global defaults) <- song.yaml (per song) <- command line."""
+"""Settings: config.yaml (defaults, comes with the tool) <- settings.yaml (your settings, kept
+by updates; written by the installer and the CDLC Maker app) <- song.yaml (per song) <- command line."""
 
 from __future__ import annotations
 
@@ -61,12 +62,31 @@ def _merge(base: dict, extra: dict) -> dict:
     return out
 
 
+USER_SETTINGS = ROOT / "settings.yaml"
+
+
 def load(config_path: Path | None) -> dict:
     cfg = copy.deepcopy(DEFAULTS)
     path = config_path or (ROOT / "config.yaml")
     if path.exists():
         cfg = _merge(cfg, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+    if config_path is None and USER_SETTINGS.exists():
+        cfg = _merge(cfg, yaml.safe_load(USER_SETTINGS.read_text(encoding="utf-8")) or {})
     return cfg
+
+
+def load_user_settings() -> dict:
+    if USER_SETTINGS.exists():
+        return yaml.safe_load(USER_SETTINGS.read_text(encoding="utf-8")) or {}
+    return {}
+
+
+def save_user_setting(section: str, key: str, value) -> None:
+    """Change one of your settings (settings.yaml; updates of the tool keep it)."""
+    data = load_user_settings()
+    data.setdefault(section, {})[key] = value
+    USER_SETTINGS.write_text("# Your settings (kept when the tool is updated). Defaults: config.yaml\n"
+                             + yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
 def load_song_yaml(folder: Path) -> dict:
