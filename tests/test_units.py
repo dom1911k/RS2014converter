@@ -474,3 +474,27 @@ def test_packaging_failure_and_repackage(tmp_path, monkeypatch):
     r = maker.latest_result(tmp_path / "song")
     assert r.psarc == psarc and r.checks == ["The tuning was guessed: E Standard."]
     assert maker.repackage_command(out)[-2:] == ["rs2014conv.repackage", str(out)]
+
+
+def test_song_folder_keys(tmp_path, monkeypatch):
+    """song.yaml's 'tab: file' is the song's tab, not the 'tab' settings section (regression)."""
+    import make_cdlc
+    from rs2014conv import pipeline
+
+    seen = {}
+    monkeypatch.setattr(pipeline, "run", lambda inp, cfg, package=True: seen.update(inp=inp, cfg=cfg))
+    gp = tmp_path / "elsewhere" / "Song.gp"
+    gp.parent.mkdir()
+    gp.write_bytes(b"gp")
+    for name, tab_line, expect in [("kit", 'tab: "Band - Song.btchart.json"', "Band - Song.btchart.json"),
+                                   ("maker", f'tab: "{gp.as_posix()}"', str(gp))]:
+        song = tmp_path / name
+        song.mkdir()
+        (song / "Band - Song.btchart.json").write_text('{"format": "bass-chart"}', encoding="utf-8")
+        (song / "song.mp3").write_bytes(b"x")
+        (song / "song.yaml").write_text(f'title: "Song"\nartist: "Band"\n{tab_line}\naudio: "song.mp3"\n'
+                                        "transcription:\n  onset_sensitivity: 0.7\n", encoding="utf-8")
+        assert make_cdlc.main([str(song)]) == 0
+        assert seen["inp"].tab is not None and seen["inp"].tab.name == Path(expect).name, name
+        assert isinstance(seen["cfg"]["tab"], dict) and seen["cfg"]["tab"]["min_sustain_beats"] == 1.0
+        assert seen["cfg"]["transcription"]["onset_sensitivity"] == 0.7   # a real settings section still works

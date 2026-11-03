@@ -580,7 +580,8 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
         warn("Packaging failed: " + (err[-1] if err else f"exit code {proc.returncode}"))
         report.add("Packaging: FAILED - " + (" ".join(err[-3:]) if err else ""))
         hint = packaging_hint((proc.stderr or "") + "\n" + (proc.stdout or ""))
-        report.check(hint or "Building the .psarc failed - see 'Packaging' below.")
+        report.check(hint or ("Building the .psarc failed: " + (err[-1].strip() if err else f"exit code {proc.returncode}")
+                              + " (see 'Packaging' below)."))
         if hint:
             report.add(f"  -> {hint}")
         return None

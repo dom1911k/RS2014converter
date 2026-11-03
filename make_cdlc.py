@@ -52,7 +52,10 @@ def main(argv: list[str] | None = None) -> int:
         folder = src
         song = config_mod.load_song_yaml(folder)
         for k in list(song):
-            if k in config_mod.DEFAULTS:  # per-song overrides of global settings
+            # Per-song overrides of global settings. Some names are both a song key and a
+            # settings section ("tab: file.gp5" vs the "tab:" settings): only a section (a
+            # dict) is a setting, otherwise it stays a song key.
+            if k in config_mod.DEFAULTS and (k not in config_mod.SONG_KEYS or isinstance(song[k], dict)):
                 cfg = config_mod._merge(cfg, {k: song.pop(k)})
 
         def find(key: str, exts: set[str], exclude: tuple[str, ...] = ()) -> Path | None:
