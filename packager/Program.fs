@@ -252,8 +252,14 @@ let private build (opts: Options) =
     Directory.CreateDirectory(outDir) |> ignore
 
     let fileName =
-        let artist = StringValidator.convertToSortField (StringValidator.FieldType.ArtistName project.ArtistName.Value)
-        let title = StringValidator.convertToSortField (StringValidator.FieldType.Title project.Title.Value)
+        // Non-Latin names (e.g. Japanese) have no letters left in a file name: use the
+        // romanized sort value instead ("Rokudenashi_Yoake-To-Hotaru_v1" instead of "__v1").
+        let part (value: string) (sortValue: string) (field: string -> StringValidator.FieldType) =
+            let converted = StringValidator.convertToSortField (field value)
+            let hasLetters (s: string) = (StringValidator.fileName s).Trim('-', '_').Length > 0
+            if hasLetters converted || String.IsNullOrWhiteSpace sortValue then converted else sortValue
+        let artist = part project.ArtistName.Value project.ArtistName.SortValue StringValidator.FieldType.ArtistName
+        let title = part project.Title.Value project.Title.SortValue StringValidator.FieldType.Title
         $"%s{artist}_%s{title}_v%s{project.Version.Replace('.', '_')}" |> StringValidator.fileName
 
     let target = Path.Combine(outDir, fileName) |> WithoutPlatformOrExtension
@@ -269,6 +275,8 @@ let private build (opts: Options) =
 
 [<EntryPoint>]
 let main argv =
+    // UTF-8 output, so paths with e.g. Japanese characters reach make_cdlc intact.
+    Console.OutputEncoding <- Text.UTF8Encoding(false)
     let opts = parseArgs argv
 
     try

@@ -209,7 +209,7 @@ All the finer settings (sensitivity, grid, sustain lengths, check-mix volume…)
 
 ```
 output\Band - Song Title\
-  Band_Song-Title_v1_p.psarc        <- the CDLC. Copy it into Rocksmith2014\dlc
+  Band_Song-Title_v1_p.psarc        <- the CDLC. Copy it into Rocksmith2014\dlc (renaming is fine, but keep the "_p.psarc" ending)
   report.txt                        <- READ THIS: tuning, tempo, warnings, places to check
   review\
     check_mix.mp3                   <- the song + a synth bass playing the chart + clicks

@@ -597,7 +597,11 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
     for line in (proc.stdout or "").splitlines():
         print("    " + line)
         if line.startswith("BUILT "):
-            built.append(Path(line[6:].strip()))
+            path = Path(line[6:].strip())
+            if not path.exists():   # (an older packager garbled non-Latin paths in its output)
+                found = sorted(out_dir.glob("*_p.psarc"), key=lambda q: q.stat().st_mtime)
+                path = found[-1] if found else path
+            built.append(path)
         elif line.startswith("ISSUE "):
             issues.append(line[6:])
         elif line.startswith("VERIFY "):
@@ -638,4 +642,8 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
             report.add(f"  copied to {dest}")
         except OSError as e:
             warn(f"Could not copy the .psarc to {dest}: {e}")
+            report.check(f"The .psarc couldn't be copied to Rocksmith's dlc folder ({dest}"
+                         + (": that folder doesn't exist" if not Path(dest).is_dir() else "")
+                         + "). Choose the right folder with 'Change…' at the bottom of the CDLC Maker, "
+                         "or copy the .psarc yourself - keep its name ending in _p.psarc.")
     return psarc

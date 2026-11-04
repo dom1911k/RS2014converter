@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from rs2014conv import config, maker  # noqa: E402
-from rs2014conv.desktop import WWISE_DOWNLOAD, find_wwise  # noqa: E402
+from rs2014conv.desktop import WWISE_DOWNLOAD, find_rocksmith_dlc, find_wwise  # noqa: E402
 
 BG, PANEL, TEXT, MUTED, ACCENT, RED, GREEN = "#15171c", "#1d2027", "#e8e8ea", "#9aa0aa", "#f2c418", "#e8202a", "#5fd38d"
 AUDIO_TYPES = [("Audio", " ".join(f"*{e}" for e in sorted(maker.AUDIO_EXT))), ("All files", "*.*")]
@@ -175,7 +175,16 @@ class App:
     def refresh_status(self):
         cfg = config.load(None)
         dest = (cfg.get("packaging") or {}).get("copy_to_folder") or ""
-        self.dlc_lbl.configure(text=f"Finished CDLC go to: {dest}" if dest else "Finished CDLC stay in each song's output folder (no Rocksmith dlc folder set)")
+        if dest and not Path(dest).is_dir():
+            found = find_rocksmith_dlc()   # e.g. Steam on another drive
+            if found:
+                config.save_user_setting("packaging", "copy_to_folder", str(found))
+                dest = str(found)
+        if dest and not Path(dest).is_dir():
+            self.dlc_lbl.configure(text=f"⚠ Rocksmith dlc folder not found: {dest} - press Change…", foreground="#ffb347")
+        else:
+            self.dlc_lbl.configure(text=f"Finished CDLC go to: {dest}" if dest else "Finished CDLC stay in each song's output folder (no Rocksmith dlc folder set)",
+                                   foreground="")
         wwise = find_wwise(cfg)
         if wwise:
             # Remember it: builds started from Chrome may not see where Wwise is installed.
