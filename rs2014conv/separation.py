@@ -12,13 +12,15 @@ from .log import info
 
 def separate_bass(mix_path: Path, cache_dir: Path, model_name: str = "htdemucs_ft",
                   device: str = "auto", shifts: int = 1) -> Path:
-    """Returns the path of a cached 44.1 kHz stereo wav with the bass stem."""
+    """Returns the path of a cached 44.1 kHz stereo FLAC with the bass stem."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     key = audio_io.file_hash(mix_path, f"{model_name}:{shifts}")
-    out = cache_dir / f"bass_{key}.wav"
-    if out.exists():
-        info(f"Bass stem: using cached separation ({out.name})")
-        return out
+    out = cache_dir / f"bass_{key}.flac"   # FLAC 24-bit: a third of a float WAV
+    for cached in (out, out.with_suffix(".wav")):   # (.wav: made by older versions)
+        if cached.exists():
+            info(f"Bass stem: using cached separation ({cached.name})")
+            cached.touch()
+            return cached
 
     import torch
     from demucs.apply import apply_model
@@ -46,6 +48,6 @@ def separate_bass(mix_path: Path, cache_dir: Path, model_name: str = "htdemucs_f
                               split=True, overlap=0.25, progress=True)[0]
     sources = sources * std + mean
     bass = sources[model.sources.index("bass")].cpu().numpy()
-    audio_io.save_wav(out, bass, sr, subtype="FLOAT")
+    audio_io.save_wav(out, bass, sr, subtype="PCM_24")
     info(f"Bass stem saved to cache ({out.name})")
     return out

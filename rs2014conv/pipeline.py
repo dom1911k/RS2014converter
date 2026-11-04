@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import audio_io, beats as beats_mod, checkmix, cover, exports, fingering, project, rsxml, sections, tuning
+from . import audio_io, beats as beats_mod, checkmix, cover, exports, fingering, project, rsxml, sections, tidy, tuning
 from .config import ROOT
 from .log import collected_warnings, info, step, warn
 from .model import Beat, Chart, Note, Section, TimeSignatureEvent
@@ -55,7 +55,7 @@ class Report:
     def text(self) -> str:
         head, rest = self.lines[:5], self.lines[5:]
         box = ["PLEASE CHECK:"] + [f"  * {a}" for a in self.attention] if self.attention else \
-              ["Nothing special to check - still listen to review\\check_mix.wav once."]
+              ["Nothing special to check - still listen to the check mix (review folder) once."]
         return "\n".join(head + box + [""] + rest) + "\n"
 
 
@@ -200,7 +200,7 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
                           cfg["beats"].get("checkpoint", "final0"), stem_path)
     if bm.source != cfg["beats"]["tracker"]:
         report.check("The Beat This! model wasn't available, so the simpler beat tracker was used. Listen to the "
-                     "clicks in review\\check_mix.wav (high click = bar start). Run setup.bat again later to get it.")
+                     "clicks in the check mix (review folder; high click = bar start). Run setup.bat again later to get it.")
     report.add(f"Beat tracker: {bm.source}; median tempo {bm.average_tempo():.1f} BPM "
                f"(range {np.percentile(bm.tempo_curve(), 5):.1f}-{np.percentile(bm.tempo_curve(), 95):.1f})")
 
@@ -370,6 +370,8 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         except Exception as e:  # noqa: BLE001
             warn(f"Section detection failed ({e}); using generic sections.")
             secs = []
+        finally:
+            (cache / "_padded_mix.wav").unlink(missing_ok=True)
     else:
         secs = []
     if not secs:
@@ -409,15 +411,16 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
                 phrase_bars=int(cfg["sections"].get("phrase_bars", 8)))
     (proj_dir / "auto_showlights.xml").unlink(missing_ok=True)  # regenerated from the new chart
 
-    audio_path = proj_dir / "audio.wav"
-    tmp_audio = proj_dir / "audio.tmp.wav"
+    # FLAC: lossless like WAV at about half the size (the packager and Wwise read it).
+    audio_path = proj_dir / "audio.flac"
+    tmp_audio = proj_dir / "audio.tmp.flac"
     audio_io.save_wav(tmp_audio, mix, SR)
     if audio_path.exists() and audio_io.file_hash(audio_path) == audio_io.file_hash(tmp_audio):
         tmp_audio.unlink()  # unchanged: keeps an existing .wem conversion valid
     else:
         tmp_audio.replace(audio_path)
-        for old in (proj_dir / "audio.wem", proj_dir / "audio_preview.wav", proj_dir / "audio_preview.wem"):
-            old.unlink(missing_ok=True)
+        for old in ("audio.wem", "audio_preview.wav", "audio_preview.wem", "audio.wav", "audio.ogg"):
+            (proj_dir / old).unlink(missing_ok=True)  # (audio.wav / .ogg: from older versions / tidying)
     cover_path = proj_dir / "cover.png"
     source_file = proj_dir / "cover_source.txt"   # where cover.png came from (kept for rebuilds)
     source = source_file.read_text(encoding="utf-8").strip() if source_file.exists() and cover_path.exists() else ""
@@ -449,12 +452,15 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     preview_start = max(0.0, min(preview_start, chart.song_length - 30))
     ids = project.load_ids(proj_dir / "ids.json", project.dlc_key(cfg["charter_name"], inp.artist, inp.title))
     rs2dlc = proj_dir / f"{_safe(inp.artist)}_{_safe(inp.title)}.rs2dlc"
-    project.write(rs2dlc, ids=ids, meta=meta, audio="audio.wav", preview="audio_preview.wav",
+    project.write(rs2dlc, ids=ids, meta=meta, audio=audio_path.name, preview="audio_preview.wav",
                   preview_start=preview_start, cover="cover.png", xml=xml_path.name, offsets=offsets,
                   bass_pick=bass_picked, tone_key=TONE_KEY, author=cfg["charter_name"], tuning_pitch=tuning_pitch)
     info(f"Arrangement XML: {xml_path}")
     info(f"DLC Builder project: {rs2dlc}")
-    eof_path = _write_eof(proj_dir, audio_path, xml_path, cfg)
+    keep_all = bool(cfg["output"].get("keep_everything"))
+    eof_path = _write_eof(proj_dir, audio_path, xml_path, cfg) if keep_all else None
+    if not keep_all:
+        shutil.rmtree(proj_dir / "eof", ignore_errors=True)
 
     step("Review files")
     exports.write_midi(review_dir / "chart.mid", chart, inp.title)
@@ -465,10 +471,13 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     cm = cfg["check_mix"]
     main, split = checkmix.render(chart, mix, stem_audio if cm["split_file"] else None, SR, cm["clicks"],
                                   float(cm["synth_gain_db"]), cents)
-    audio_io.save_wav(review_dir / "check_mix.wav", main, SR)
-    if split is not None:
-        audio_io.save_wav(review_dir / "check_bass_vs_chart.wav", split, SR)
-    info(f"Check mix: {review_dir / 'check_mix.wav'}")
+    fmt = cm.get("format", "mp3")
+    check_mix = tidy.save_listening(review_dir / "check_mix", main, SR, fmt)
+    split_path = tidy.save_listening(review_dir / "check_bass_vs_chart", split, SR, fmt) if split is not None else None
+    if split is None:
+        for old in review_dir.glob("check_bass_vs_chart.*"):
+            old.unlink()
+    info(f"Check mix: {check_mix}")
 
     # ------------------------------------------------------------- report
     report.add(f"Tuning: {tuning_note}")
@@ -502,13 +511,18 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
     report.add("")
     report.add("Files:")
     report.add(f"  CDLC:        {psarc_path or '(not built)'}")
-    report.add(f"  Check mix:   {review_dir / 'check_mix.wav'}")
-    report.add(f"  Stem/chart:  {review_dir / 'check_bass_vs_chart.wav'} (left = bass stem, right = chart synth)")
+    report.add(f"  Check mix:   {check_mix}")
+    if split_path:
+        report.add(f"  Stem/chart:  {split_path} (left = bass stem, right = chart synth)")
     report.add(f"  MIDI / GP5:  {review_dir / 'chart.mid'}, {review_dir / 'chart.gp5'}")
     if eof_path:
         report.add(f"  EOF project: {eof_path}")
     report.add(f"  Rocksmith XML (open in EOF via File > Import > Rocksmith): {xml_path}")
     report.add(f"  DLC Builder project: {rs2dlc}")
+    if not keep_all:
+        report.add("  (Big work files were left out or compressed to keep this folder small; "
+                   "set output: keep_everything: true in settings.yaml to keep them, e.g. for EOF.)")
+    tidy.prune_cache(cache, float(cfg["output"].get("cache_days", 30)))
     (out_dir / "report.txt").write_text(report.text(), encoding="utf-8")
     step("Done")
     if report.attention:
@@ -610,6 +624,11 @@ def _package(rs2dlc: Path, out_dir: Path, cfg: dict, report: Report) -> Path | N
         for i in issues:
             report.add(f"    {i}")
     psarc = built[0]
+    if not (cfg.get("output") or {}).get("keep_everything"):
+        # Built: the big project audio isn't needed any more (a small .ogg is kept for rebuilding).
+        freed = tidy.slim_project(rs2dlc.parent)
+        if freed:
+            info(f"Cleaned up the project's work files ({tidy.mb(freed)} freed)")
     dest = pc.get("copy_to_folder")
     if dest:
         try:

@@ -14,7 +14,8 @@ from .pipeline import Report, _package
 
 PACKAGING_CHECKS = ("Building the .psarc failed", "No .psarc was built", "Wwise 2023 wasn't found",
                     "Your Wwise is a version", "Wwise couldn't convert", "DLC Builder's chart checks")
-NOTHING = "Nothing special to check - still listen to review\\check_mix.wav once."
+NOTHING = "Nothing special to check - still listen to the check mix (review folder) once."
+OLD_NOTHING = "Nothing special to check - still listen to review\\check_mix.wav once."
 
 
 def update_report(text: str, new: Report, psarc: Path | None = None) -> str:
@@ -23,7 +24,7 @@ def update_report(text: str, new: Report, psarc: Path | None = None) -> str:
     # 1. The PLEASE CHECK box: keep the other checks, replace the packaging ones.
     checks, start, end = [], None, None
     for i, line in enumerate(lines):
-        if line.startswith("PLEASE CHECK:") or line == NOTHING:
+        if line.startswith("PLEASE CHECK:") or line in (NOTHING, OLD_NOTHING):
             start = i
             end = i + 1
             while end < len(lines) and lines[end].startswith("  * "):

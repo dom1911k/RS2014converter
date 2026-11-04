@@ -114,6 +114,8 @@ class App:
         ttk.Button(left, text="+ New song (choose audio)…", command=self.new_song).pack(fill="x")
         ttk.Button(left, text="Open a song folder…", command=self.open_folder).pack(fill="x", pady=(6, 0))
         ttk.Label(left, text="Songs from the Bass Trainer extension\nappear here too.", style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
+        self.tidy_btn = ttk.Button(left, text="Free up space", command=self.free_space)
+        self.tidy_btn.pack(fill="x", pady=(8, 0))
 
         right = ttk.Frame(body, style="Panel.TFrame", padding=14)
         right.pack(side="left", fill="both", expand=True, padx=(10, 0))
@@ -205,6 +207,39 @@ class App:
         subprocess.Popen(["powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Update"],
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
         self.root.destroy()   # the updater starts the app again when it's done
+
+    def free_space(self):
+        """Shrink every song's output (MP3 check mixes, small project audio) and empty the cache."""
+        if self.proc:
+            messagebox.showinfo("Free up space", "Wait until the CDLC is finished.")
+            return
+        if not messagebox.askokcancel("Free up space",
+                                      "This keeps every finished CDLC and what's needed to build it again, "
+                                      "but compresses the check mixes and the songs' work audio, and empties "
+                                      "the cache (building a song again then separates the bass again).\n\nContinue?"):
+            return
+        self.tidy_btn.configure(state="disabled", text="Freeing up space…")
+
+        def work():
+            from rs2014conv import tidy
+
+            try:
+                cfg = config.load(None)
+                keep = bool((cfg.get("output") or {}).get("keep_everything"))
+                msg = f"Done: {tidy.mb(tidy.tidy_all(maker.songs_dir(cfg), Path(cfg['cache_dir']), keep))} freed."
+            except Exception as e:  # noqa: BLE001
+                msg = f"Something went wrong: {e}"
+
+            def done():
+                self.tidy_btn.configure(state="normal", text="Free up space")
+                messagebox.showinfo("Free up space", msg)
+                keep = self.song.folder if self.song else None
+                self.refresh_songs(keep)
+                for i, (folder, _, _) in enumerate(self.songs):
+                    if folder == keep:
+                        self.select(i)   # the result buttons point at the new (compressed) files
+            self.root.after(0, done)
+        threading.Thread(target=work, daemon=True).start()
 
     def change_dlc(self):
         d = filedialog.askdirectory(title="Rocksmith 2014's dlc folder (Steam\\steamapps\\common\\Rocksmith2014\\dlc)")

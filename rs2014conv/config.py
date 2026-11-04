@@ -36,7 +36,8 @@ DEFAULTS: dict = {
     "fingering": {"max_fret": 24, "shift_cost": 1.0, "height_cost": 0.01, "string_jump_cost": 0.3,
                   "open_string_bonus": 0.15},
     "sections": {"auto_detect": True, "min_bars": 8, "phrase_bars": 8},
-    "check_mix": {"clicks": True, "synth_gain_db": 0.0, "split_file": True, "format": "wav"},
+    "check_mix": {"clicks": True, "synth_gain_db": 0.0, "split_file": True, "format": "mp3"},
+    "output": {"keep_everything": False, "cache_days": 30},
     "bass_trainer": {"songs_folder": ""},
     "album_art": {"download": True},
     "packaging": {

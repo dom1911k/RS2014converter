@@ -387,6 +387,7 @@ def detect(mix_path: Path, cache_dir: Path, tracker: str = "beat_this", device: 
     cache = cache_dir / f"beats_{key}.json"
     if cache.exists():
         info(f"Beat map: using cached result ({cache.name})")
+        cache.touch()
         return BeatMap.from_json(json.loads(cache.read_text()))
 
     if song_length is None:

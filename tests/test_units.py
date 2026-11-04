@@ -433,7 +433,7 @@ def test_desktop_and_maker(tmp_path, monkeypatch):
     (out / "review").mkdir(parents=True)
     (out / "report.txt").write_text("x\nPLEASE CHECK:\n  * Listen at 1:02.\n  * Tuning guessed.\n\nmore\n", encoding="utf-8")
     (out / "Band_Song_v1_p.psarc").write_bytes(b"p")
-    (out / "review" / "check_mix.wav").write_bytes(b"w")
+    (out / "review" / "check_mix.mp3").write_bytes(b"w")
     r = maker.latest_result(kit)
     assert r.checks == ["Listen at 1:02.", "Tuning guessed."] and r.psarc.name == "Band_Song_v1_p.psarc" and r.check_mix
     names = [s.title for _, s, _ in maker.list_songs(tmp_path / "songs")]
@@ -542,3 +542,78 @@ def test_album_cover_matching():
     assert m("21 Guns", "Green Day", "21 Guns", "Green Day", "21 Guns - Single") > \
         m("21 Guns", "Green Day", "21 Guns", "Green Day", "Transformers: Revenge of the Fallen (Soundtrack)")
     assert m("Hoshi to Bokura to", "Lyn", "Hoshi to Bokura to", "PERSONA 5 Special Big Band & Lyn", "Big Band Concert 2025") < 1.0
+
+
+def test_tidy_output_and_cache(tmp_path):
+    import json
+    import os
+    import time
+
+    import soundfile as sf
+
+    from rs2014conv import tidy
+    from rs2014conv.repackage import OLD_NOTHING, update_report
+    from rs2014conv.pipeline import Report
+
+    sr = 44100
+    t = np.arange(sr * 20) / sr
+    tone = (0.3 * np.sin(2 * np.pi * 110 * t)).astype(np.float32)
+    stereo = np.stack([tone, tone])
+
+    # The check mix as MP3 (much smaller than a WAV).
+    review = tmp_path / "out" / "review"
+    review.mkdir(parents=True)
+    mp3 = tidy.save_listening(review / "check_mix", stereo, sr)
+    assert mp3.suffix == ".mp3" and mp3.stat().st_size < 0.25 * stereo.size * 2
+
+    def song(name, built):
+        out = tmp_path / "songs" / name / "output" / "Band - Song"
+        proj = out / "project"
+        (out / "review").mkdir(parents=True)
+        (proj / "eof").mkdir(parents=True)
+        sf.write(str(out / "review" / "check_bass_vs_chart.wav"), stereo.T, sr, subtype="PCM_16")
+        sf.write(str(proj / "audio.flac"), stereo.T, sr, subtype="PCM_16")
+        for f in ("audio.wem", "audio_preview.wem", "audio_preview.wav", "eof/guitar.ogg"):
+            (proj / f).write_bytes(b"x" * 1000)
+        (proj / "Song.rs2dlc").write_text(json.dumps({"AudioFile": {"Path": "audio.flac", "Volume": -7},
+                                                      "AudioPreviewFile": {"Path": "audio_preview.wav", "Volume": -7}}))
+        (out / "report.txt").write_text("report\n")
+        if built:
+            (out / "Song_v1_p.psarc").write_bytes(b"psarc")
+        return out
+
+    built, failed = song("built", True), song("failed", False)
+    assert tidy.tidy_all(tmp_path / "songs") > 0
+    for out in (built, failed):   # check mixes compressed either way
+        assert (out / "review" / "check_bass_vs_chart.mp3").exists()
+        assert not (out / "review" / "check_bass_vs_chart.wav").exists()
+    # Built: a small .ogg is kept for "Build the .psarc again"; the rest of the work audio goes.
+    proj = built / "project"
+    assert (proj / "audio.ogg").exists() and not (proj / "audio.flac").exists()
+    assert not list(proj.glob("*.wem")) and not (proj / "audio_preview.wav").exists() and not (proj / "eof").exists()
+    assert json.loads((proj / "Song.rs2dlc").read_text())["AudioFile"]["Path"] == "audio.ogg"
+    assert (built / "Song_v1_p.psarc").exists() and (built / "report.txt").exists()
+    # Not built yet: the lossless audio stays for the next try.
+    assert (failed / "project" / "audio.flac").exists() and (failed / "project" / "audio.wem").exists()
+    assert tidy.tidy_output(built) == 0   # nothing left to do
+
+    # keep_everything: the project stays as it is.
+    keep = song("keep", True)
+    tidy.tidy_output(keep, keep_everything=True)
+    assert (keep / "project" / "audio.flac").exists() and (keep / "project" / "eof").exists()
+
+    # Cache: entries not used for cache_days go, recent ones stay (all with everything=True).
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    old, new, tmp = cache / "bass_old.flac", cache / "bass_new.flac", cache / "_padded_mix.wav"
+    for f in (old, new, tmp):
+        f.write_bytes(b"x" * 100)
+    os.utime(old, (time.time() - 40 * 86400,) * 2)
+    assert tidy.prune_cache(cache, 30) == 200 and new.exists() and not old.exists() and not tmp.exists()
+    assert tidy.prune_cache(cache, everything=True) == 100 and not new.exists()
+
+    # Reports from older versions still get their packaging box updated.
+    rep = Report()
+    rep.check("Wwise 2023 wasn't found")
+    text = update_report("a\nb\nc\nd\ne\n" + OLD_NOTHING + "\n\nPackaging: OK\n", rep)
+    assert "PLEASE CHECK:" in text and OLD_NOTHING not in text

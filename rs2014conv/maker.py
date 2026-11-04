@@ -194,7 +194,8 @@ def latest_result(folder: Path) -> Result | None:
         return None
     out = reports[-1].parent
     psarcs = sorted(out.glob("*.psarc"), key=lambda p: p.stat().st_mtime)
-    mixes = sorted((out / "review").glob("check_mix*.wav")) if (out / "review").exists() else []
+    mixes = sorted(p for p in (out / "review").glob("check_mix*.*") if p.suffix.lower() in (".mp3", ".wav", ".ogg")) \
+        if (out / "review").exists() else []
     projects = sorted((out / "project").glob("*.rs2dlc")) if (out / "project").exists() else []
     lines = reports[-1].read_text(encoding="utf-8", errors="replace").splitlines()
     packaging = next((ln for ln in lines if ln.startswith("Packaging:")), "")

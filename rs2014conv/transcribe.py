@@ -68,6 +68,7 @@ def pitch_track(y: np.ndarray, method: str, device: str, cache_file=None) -> tup
     if cache_file is not None and cache_file.exists():
         d = np.load(cache_file)
         info(f"Pitch track: using cached result ({cache_file.name})")
+        cache_file.touch()
         return d["f0"], d["conf"], str(d["method"])
     f0, conf, used = _pitch_track(y, method, device)
     if cache_file is not None and used == method:

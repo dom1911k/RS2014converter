@@ -19,7 +19,7 @@ fake.write_text("import sys, pathlib, time\nsong = pathlib.Path(sys.argv[1]); ou
                 "  '  * Wwise couldn\\'t convert the audio. Start Wwise once, then use Build the .psarc again.\\n\\nPackaging: FAILED - x\\n')\n"
                 "(out / 'project').mkdir(exist_ok=True); (out / 'project' / 'Band_Song.rs2dlc').write_text('{}')\n"
                 "import shutil, os; c = os.environ.get('SMOKE_COVER'); c and shutil.copy(c, out / 'project' / 'cover.png')\n"
-                "(out / 'review' / 'check_mix.wav').write_bytes(b'w')\n")
+                "(out / 'review' / 'check_mix.mp3').write_bytes(b'w')\n")
 # 'Build the .psarc again': a stand-in that makes the .psarc and updates the report.
 refake = tmp / 'fake_repack.py'
 refake.write_text("import sys, pathlib\nout = pathlib.Path(sys.argv[1]); print('== Packaging', flush=True)\n"

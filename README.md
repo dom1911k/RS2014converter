@@ -212,16 +212,32 @@ output\Band - Song Title\
   Band_Song-Title_v1_p.psarc        <- the CDLC. Copy it into Rocksmith2014\dlc
   report.txt                        <- READ THIS: tuning, tempo, warnings, places to check
   review\
-    check_mix.wav                   <- the song + a synth bass playing the chart + clicks
-    check_bass_vs_chart.wav         <- left ear: the real bass alone, right ear: the chart
+    check_mix.mp3                   <- the song + a synth bass playing the chart + clicks
+    check_bass_vs_chart.mp3         <- left ear: the real bass alone, right ear: the chart
     chart.gp5                       <- the chart as Guitar Pro tab (tempo follows the song)
     chart.mid                       <- the chart as MIDI (timed exactly like the audio)
   project\
     arr_bass_RS2.xml                <- the Rocksmith arrangement
-    eof\notes.eof                   <- the same chart as an EOF project (to fix it by hand)
     Band_Song Title.rs2dlc          <- DLC Builder project (for rebuilding)
-    audio.wav, cover.png, ids.json  <- inputs for the package (keep ids.json!)
+    audio.ogg, cover.png, ids.json  <- inputs for the package (keep ids.json!)
 ```
+
+A finished song takes about 25 MB here (the .psarc itself ~7 MB). The big work files are cleaned
+up automatically: the check mixes are MP3s, and once the .psarc is built the project keeps its audio
+as a small `audio.ogg` (enough for **Build the .psarc again**; Wwise converts it again then). While
+the .psarc couldn't be built yet, the project keeps the lossless `audio.flac`.
+Want everything (lossless audio, the `.wem` files, an EOF project `project\eof\notes.eof` to fix the
+chart by hand in Editor on Fire)? Add this to `settings.yaml`:
+
+```yaml
+output:
+  keep_everything: true
+```
+
+Older songs (made before this cleanup) or the `cache` folder taking space? **Free up space** in the
+CDLC Maker (or `python -m rs2014conv.tidy`) shrinks every song's output the same way and empties the
+cache. The cache (separated bass stems, beat maps) only makes building the same song again faster;
+entries not used for 30 days are deleted by themselves.
 
 ### Checking the chart (do this before playing)
 
@@ -229,11 +245,11 @@ output\Band - Song Title\
    your ears: a guessed tuning, measures where tab and recording disagree (with times), the fallback beat
    tracker, chart-check issues, packaging problems. Below that are the details: tuning, tempo, where
    the chart starts, sections.
-2. **Listen to `review\check_mix.wav`.** You hear the song with a simple synth playing exactly what
+2. **Listen to `review\check_mix.mp3`.** You hear the song with a simple synth playing exactly what
    Rocksmith will show, plus a click on every beat (higher click = first beat of a bar).
    If the synth and the real bass agree, the chart is right. Listen especially at the times
    listed in the report.
-3. **Hard to hear?** `check_bass_vs_chart.wav` puts the separated real bass in your left ear and the
+3. **Hard to hear?** `check_bass_vs_chart.mp3` puts the separated real bass in your left ear and the
    chart in your right ear.
 4. **Want to see the notes?** Open `review\chart.gp5` in Guitar Pro (or the free TuxGuitar /
    MuseScore), or `chart.mid` in any MIDI program.
