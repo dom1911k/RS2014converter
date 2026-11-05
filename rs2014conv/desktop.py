@@ -102,6 +102,47 @@ def find_wwise(cfg: dict | None = None) -> Path | None:
     return None
 
 
+BASS_TRAINER_ID = "gbbniikkcomblgdcdmbcanlcilmaeohh"   # fixed by the key in the extension's manifest
+
+
+def browsers() -> list[Path]:
+    """Chrome, Edge and Brave (the browsers the Bass Trainer link is registered for)."""
+    if sys.platform != "win32":
+        return []
+    import winreg
+
+    out = []
+    for exe in ("chrome.exe", "msedge.exe", "brave.exe"):
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(hive, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe}") as k:
+                    p = Path(winreg.QueryValueEx(k, "")[0])
+                if p.exists() and p not in out:
+                    out.append(p)
+            except OSError:
+                pass
+    return out
+
+
+def bass_trainer_test_url(song_folder: Path) -> str:
+    from urllib.parse import quote
+
+    return f"chrome-extension://{BASS_TRAINER_ID}/player/player.html#test={quote(str(Path(song_folder).resolve()), safe='')}"
+
+
+def open_in_bass_trainer(song_folder: Path) -> bool:
+    """Open the Bass Trainer player on a song's finished CDLC chart. False if no browser."""
+    import subprocess
+
+    for exe in browsers():
+        try:
+            subprocess.Popen([str(exe), bass_trainer_test_url(song_folder)])
+            return True
+        except OSError:
+            continue
+    return False
+
+
 def make_icon(path: Path) -> Path:
     """A simple app icon (a yellow note gem on dark), as .ico."""
     from PIL import Image, ImageDraw

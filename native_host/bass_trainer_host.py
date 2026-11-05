@@ -12,6 +12,9 @@ followed by UTF-8 JSON.
     -> end                                <- saved {dir}
     -> build                              <- step / log ... then done {ok, psarc, outDir, checks, copiedTo, error}
     -> open {folder, what}                <- opened
+    -> test {folder}                      <- test-chart {xml, title, audioName, size}, test-audio {data}
+                                             (repeated), test-end: the finished chart + its audio,
+                                             to try it on the Bass Trainer highway
     -> cancel                             (stops a running build)
 
 Nothing is printed to stdout except messages (Chrome would drop the connection).
@@ -29,7 +32,8 @@ import sys
 import threading
 from pathlib import Path
 
-VERSION = 1
+VERSION = 2   # 2: "test"
+TEST_CHUNK = 600_000   # bytes of audio per message (Chrome takes at most 1 MB from the host)
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -160,6 +164,8 @@ class Host:
             threading.Thread(target=self._build_safe, daemon=True).start()
         elif t == "open":
             self.open_folder(msg)
+        elif t == "test":
+            self.send_test(msg)
         elif t == "cancel":
             if self.proc and self.proc.poll() is None:
                 self.proc.terminate()
@@ -199,6 +205,41 @@ class Host:
                     "psarc": str(psarcs[-1]) if psarcs else "", "copiedTo": copied,
                     "checks": report_checks(out_dir / "report.txt") if out_dir else [],
                     "error": "" if ok else (last_error or f"make_cdlc stopped (code {code})")})
+
+    def song_folder(self, name: str) -> Path:
+        """A song folder: a name in the songs folder, or the full path of a folder with song.yaml."""
+        p = Path(str(name))
+        if p.is_absolute():
+            if not (p / "song.yaml").exists():
+                raise ValueError(f"not a song folder: {p}")
+            return p
+        return songs_dir(self.cfg) / safe_name(name)
+
+    def send_test(self, msg: dict) -> None:
+        """The newest built chart (Rocksmith XML) of a song and the audio it is timed to."""
+        base = self.song_folder(msg.get("folder", ""))
+        projects = sorted((base / "output").glob("*/project/*.rs2dlc"), key=lambda p: p.stat().st_mtime)
+        if not projects:
+            raise ValueError("this song has no CDLC yet - make it first")
+        rs2dlc = projects[-1]
+        proj = json.loads(rs2dlc.read_text(encoding="utf-8"))
+        arr = next(a["Fields"][0] for a in proj.get("Arrangements", []) if a.get("Case") == "Instrumental")
+        xml = Path(arr["XML"]) if Path(arr["XML"]).is_absolute() else rs2dlc.parent / arr["XML"]
+        audio = Path(proj["AudioFile"]["Path"])
+        audio = audio if audio.is_absolute() else rs2dlc.parent / audio
+        if not audio.exists():
+            raise ValueError(f"the CDLC's audio is missing ({audio.name})")
+        size = audio.stat().st_size
+        self.write({"type": "test-chart", "xml": xml.read_text(encoding="utf-8"),
+                    "title": f"{proj['ArtistName']['Value']} - {proj['Title']['Value']}",
+                    "audioName": audio.name, "size": size})
+        with open(audio, "rb") as f:
+            while True:
+                data = f.read(TEST_CHUNK)
+                if not data:
+                    break
+                self.write({"type": "test-audio", "data": base64.b64encode(data).decode("ascii")})
+        self.write({"type": "test-end"})
 
     def open_folder(self, msg: dict) -> None:
         if msg.get("what") == "dlc":

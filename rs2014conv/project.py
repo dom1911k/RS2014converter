@@ -83,6 +83,10 @@ def write(path: Path, *, ids: dict, meta: dict, audio: str, preview: str | None,
         }],
         "Tones": [],
     }
+    if meta.get("japanese_title"):
+        proj["JapaneseTitle"] = meta["japanese_title"]
+    if meta.get("japanese_artist"):
+        proj["JapaneseArtistName"] = meta["japanese_artist"]
     if preview_start is not None:
         proj["AudioPreviewStartTime"] = round(float(preview_start), 3)
     path.write_text(json.dumps(proj, indent=2, ensure_ascii=False), encoding="utf-8")

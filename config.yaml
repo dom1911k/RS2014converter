@@ -66,6 +66,11 @@ check_mix:
   split_file: true        # also write check_bass_vs_chart (stem left, chart right)
   format: mp3             # mp3 (small) or wav
 
+names:
+  # Japanese titles/artists: show them in Latin letters in Rocksmith's song list (easy to find,
+  # e.g. "Rokudenashi - Yoake To Hotaru"); the Japanese names are kept in the CDLC's Japanese fields.
+  romanize_japanese: true
+
 output:
   # false: keep each song's output small - the check mixes as MP3, and after a successful build
   # the project's audio as a small .ogg (enough for "Build the .psarc again"), no EOF project.

@@ -404,6 +404,13 @@ def run(inp: SongInputs, cfg: dict, package: bool = True) -> Path:
         "title": inp.title, "artist": inp.artist, "album": inp.album or inp.title,
         "year": inp.year or _dt.date.today().year, "version": inp.version,
     }
+    if (cfg.get("names") or {}).get("romanize_japanese", True):
+        from .text import display_names
+
+        display_names(meta)
+        if meta.get("japanese_title") or meta.get("japanese_artist"):
+            report.add(f"Song list name: {meta['artist']} - {meta['title']} (Japanese names kept in the Japanese "
+                       "name fields; names: romanize_japanese: false in settings.yaml keeps them as they are)")
     meta.update(title_sort=project.sort_value(meta["title"]), artist_sort=project.sort_value(meta["artist"]),
                 album_sort=project.sort_value(meta["album"]))
     xml_path = proj_dir / "arr_bass_RS2.xml"

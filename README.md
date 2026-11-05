@@ -107,7 +107,9 @@ Open **RS2014 CDLC Maker** (desktop or Start menu):
    transcribed from the audio.
 3. **⚡ Make CDLC**. You see the progress; at the end **Please check** lists what to listen to,
    **▶ Listen to the check mix** plays the song with the chart, and the CDLC is already in
-   Rocksmith (if your `dlc` folder was found).
+   Rocksmith (if your `dlc` folder was found). **▶ Test on the highway** opens the finished chart
+   with its audio in the Bass Trainer player (Chrome, with the Bass Trainer extension): exactly the
+   notes and timing Rocksmith will show, to check before starting the game.
 
 **Album cover:** if you don't choose a cover image, the album cover is looked up online (iTunes,
 then Deezer; title and artist must match, the original album is preferred over live versions,
@@ -251,7 +253,9 @@ entries not used for 30 days are deleted by themselves.
    listed in the report.
 3. **Hard to hear?** `check_bass_vs_chart.mp3` puts the separated real bass in your left ear and the
    chart in your right ear.
-4. **Want to see the notes?** Open `review\chart.gp5` in Guitar Pro (or the free TuxGuitar /
+4. **Want to see it like in the game?** **▶ Test on the highway** in the CDLC Maker (or on the Bass
+   Trainer's kit card) plays the finished chart on the Bass Trainer's highway with its audio.
+5. **Want to see the notes?** Open `review\chart.gp5` in Guitar Pro (or the free TuxGuitar /
    MuseScore), or `chart.mid` in any MIDI program.
 
 ### Fixing something
@@ -356,9 +360,16 @@ unticked in its configuration. A **Release** build from DLC Builder adds DD.
 
 ### Japanese (and other non-Latin) titles
 
-Titles and artists can be written in Japanese: the game's font has kana and the common kanji
-(if a character is missing, the packager warns). The sort names and the internal DLC key need
-Latin letters, so they're romanized automatically (e.g. 自由のショート → "Jiyuu No Shooto").
+Titles and artists can be written in Japanese. In Rocksmith's song list they're shown in Latin
+letters, so the song is easy to find (ロクデナシ - 夜明けと蛍 → "Rokudenashi - Yoake To Hotaru"); the
+Japanese names go into the CDLC's Japanese name fields, like on official Japanese songs. The file
+name, sort names and internal DLC key use the same romanized names. To show the Japanese names in
+the song list instead, put this in `settings.yaml`:
+
+```yaml
+names:
+  romanize_japanese: false
+```
 
 ### Timing check
 

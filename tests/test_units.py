@@ -617,3 +617,59 @@ def test_tidy_output_and_cache(tmp_path):
     rep.check("Wwise 2023 wasn't found")
     text = update_report("a\nb\nc\nd\ne\n" + OLD_NOTHING + "\n\nPackaging: OK\n", rep)
     assert "PLEASE CHECK:" in text and OLD_NOTHING not in text
+
+
+def test_japanese_display_names(tmp_path):
+    import json
+
+    from rs2014conv import project
+    from rs2014conv.text import display_names
+
+    meta = display_names({"title": "夜明けと蛍", "artist": "ロクデナシ", "album": "夜明けと蛍", "year": 2026, "version": "1"})
+    assert (meta["artist"], meta["title"], meta["album"]) == ("Rokudenashi", "Yoake To Hotaru", "Yoake To Hotaru")
+    assert (meta["japanese_artist"], meta["japanese_title"]) == ("ロクデナシ", "夜明けと蛍")
+    latin = display_names({"title": "21 Guns", "artist": "Green Day", "album": "21 Guns"})
+    assert "japanese_title" not in latin and latin["title"] == "21 Guns"
+    meta.update(title_sort=project.sort_value(meta["title"]), artist_sort=project.sort_value(meta["artist"]),
+                album_sort=project.sort_value(meta["album"]))
+    ids = {"DLCKey": "maRokudYoake", "ArrangementID": "a", "MasterID": 1, "PersistentID": "p"}
+    out = tmp_path / "x.rs2dlc"
+    project.write(out, ids=ids, meta=meta, audio="audio.flac", preview="audio_preview.wav", preview_start=None,
+                  cover="cover.png", xml="arr_bass_RS2.xml", offsets=[0] * 6, bass_pick=False, tone_key="t", author="me")
+    p = json.loads(out.read_text(encoding="utf-8"))
+    assert p["JapaneseTitle"] == "夜明けと蛍" and p["JapaneseArtistName"] == "ロクデナシ"
+    assert p["Title"]["Value"] == "Yoake To Hotaru"
+
+
+def test_host_sends_finished_cdlc_for_testing(tmp_path):
+    import base64
+    import json
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "native_host"))
+    import bass_trainer_host as bt
+
+    song = tmp_path / "songs" / "Band - Song"
+    proj = song / "output" / "Band - Song" / "project"
+    proj.mkdir(parents=True)
+    (song / "song.yaml").write_text("title: Song\n")
+    (proj / "arr_bass_RS2.xml").write_text("<song><ebeats/></song>", encoding="utf-8")
+    audio = bytes(range(256)) * 5000   # 1.28 MB: three chunks
+    (proj / "audio.ogg").write_bytes(audio)
+    (proj / "Band_Song.rs2dlc").write_text(json.dumps({
+        "ArtistName": {"Value": "Band"}, "Title": {"Value": "Song"}, "AudioFile": {"Path": "audio.ogg"},
+        "Arrangements": [{"Case": "Instrumental", "Fields": [{"XML": "arr_bass_RS2.xml"}]}]}))
+    sent = []
+    host = bt.Host(write=sent.append)
+    host.cfg = {"bass_trainer": {"songs_folder": str(tmp_path / "songs")}}
+    host.handle({"type": "test", "folder": "Band - Song"})
+    assert sent[0]["type"] == "test-chart" and sent[0]["xml"].startswith("<song>") and sent[0]["size"] == len(audio)
+    assert sent[0]["title"] == "Band - Song" and sent[-1]["type"] == "test-end"
+    chunks = [m for m in sent if m["type"] == "test-audio"]
+    assert len(chunks) == 3 and all(len(json.dumps(m)) < 1_000_000 for m in chunks)
+    assert b"".join(base64.b64decode(m["data"]) for m in chunks) == audio
+    # The same by full path (a song opened from elsewhere in the CDLC Maker); not any folder.
+    sent.clear()
+    host.handle({"type": "test", "folder": str(song)})
+    assert sent[0]["type"] == "test-chart"
+    with pytest.raises(ValueError):
+        host.handle({"type": "test", "folder": str(tmp_path)})

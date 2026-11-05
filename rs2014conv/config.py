@@ -38,6 +38,7 @@ DEFAULTS: dict = {
     "sections": {"auto_detect": True, "min_bars": 8, "phrase_bars": 8},
     "check_mix": {"clicks": True, "synth_gain_db": 0.0, "split_file": True, "format": "mp3"},
     "output": {"keep_everything": False, "cache_days": 30},
+    "names": {"romanize_japanese": True},
     "bass_trainer": {"songs_folder": ""},
     "album_art": {"download": True},
     "packaging": {

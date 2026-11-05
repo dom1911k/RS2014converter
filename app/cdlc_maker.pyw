@@ -155,7 +155,10 @@ class App:
         self.out_btn = ttk.Button(results, text="Open output folder", command=lambda: self.result and open_path(self.result.out_dir))
         self.mix_btn = ttk.Button(results, text="▶ Listen to the check mix", command=lambda: self.result and self.result.check_mix and open_path(self.result.check_mix))
         self.repack_btn = ttk.Button(results, text="⟳ Build the .psarc again", command=self.repackage)
-        self.report_btn = ttk.Button(results, text="Report", command=lambda: self.result and open_path(self.result.out_dir / "report.txt"))
+        self.results2 = ttk.Frame(right, style="Panel.TFrame")
+        self.results2.pack(fill="x", pady=(6, 0))
+        self.test_btn = ttk.Button(self.results2, text="▶ Test on the highway (Bass Trainer)", command=self.test_on_highway)
+        self.report_btn = ttk.Button(self.results2, text="Report", command=lambda: self.result and open_path(self.result.out_dir / "report.txt"))
         self.progress = ttk.Progressbar(right, mode="indeterminate")
         self.step_lbl = ttk.Label(right, text="", style="Panel.TLabel")
         self.step_lbl.pack(anchor="w", pady=(10, 2))
@@ -216,6 +219,20 @@ class App:
         subprocess.Popen(["powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-Update"],
                          creationflags=subprocess.CREATE_NEW_CONSOLE)
         self.root.destroy()   # the updater starts the app again when it's done
+
+    def test_on_highway(self):
+        """Open the finished chart with its audio in the Bass Trainer player (Chrome)."""
+        if not self.song or not self.song.folder:
+            return
+        from rs2014conv.desktop import open_in_bass_trainer
+
+        if not open_in_bass_trainer(self.song.folder):
+            messagebox.showinfo("Test on the highway",
+                                "Couldn't start Chrome with the Bass Trainer player. Open the player yourself "
+                                "(Bass Trainer → Library → Player), click Open… and choose these two files from "
+                                "the output folder's 'project' folder:\n\n  arr_bass_RS2.xml\n  audio.ogg (or audio.flac)")
+            if self.result:
+                open_path(self.result.out_dir / "project")
 
     def free_space(self):
         """Shrink every song's output (MP3 check mixes, small project audio) and empty the cache."""
@@ -310,15 +327,17 @@ class App:
     def show_result(self, res: maker.Result | None):
         self.result = res
         self.show_cover(res)
-        for b in (self.out_btn, self.mix_btn, self.report_btn, self.repack_btn):
+        for b in (self.out_btn, self.mix_btn, self.report_btn, self.repack_btn, self.test_btn):
             b.pack_forget()
+        if res and res.rs2dlc:
+            self.test_btn.pack(side="left")
         if res:
             if res.rs2dlc:   # also for a finished song: e.g. to get the album cover without a full rebuild
                 self.repack_btn.pack(side="left", padx=(0, 8))
             self.out_btn.pack(side="left")
             if res.check_mix:
                 self.mix_btn.pack(side="left", padx=(8, 0))
-            self.report_btn.pack(side="left", padx=(8, 0))
+            self.report_btn.pack(side="left", padx=(8 if res.rs2dlc else 0, 0))
             done = "✓ CDLC made" if res.psarc else ("Made everything except the .psarc. Fix what's listed below, then "
                                                     "press ⟳ Build the .psarc again (takes seconds).")
             if res.tab:

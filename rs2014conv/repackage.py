@@ -67,7 +67,9 @@ def _maybe_cover(rs2dlc: Path, cfg: dict, rep: Report) -> None:
         return
     try:
         p = json.loads(rs2dlc.read_text(encoding="utf-8"))
-        title, artist = p["Title"]["Value"], p["ArtistName"]["Value"]
+        # (the original names when the song list shows romanized Japanese ones)
+        title = p.get("JapaneseTitle") or p["Title"]["Value"]
+        artist = p.get("JapaneseArtistName") or p["ArtistName"]["Value"]
         album = (p.get("AlbumName") or {}).get("Value", "")
         art = proj / (p.get("AlbumArtFile") or "cover.png")
     except (OSError, ValueError, KeyError, TypeError):
